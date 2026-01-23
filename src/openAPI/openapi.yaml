@@ -1,0 +1,585 @@
+openapi: 3.0.0
+info:
+  title: Plenartrend API
+  description: API documentation for the Plenartrend application, providing access to political topics, politicians, speeches, campaigns, and alerts.
+  version: 1.0.0
+servers:
+  - url: http://plenartrend.de/api/v1
+    description: Local Development Server
+
+paths:
+  /topics:
+    get:
+      summary: List all topics
+      description: Retrieves a list of all political topics.
+      responses:
+        '200':
+          description: A list of topics.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Topic'
+
+  /topics/{id}:
+    get:
+      summary: Get a specific topic
+      description: Retrieves detailed information about a specific topic.
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: The ID of the topic.
+      responses:
+        '200':
+          description: Detailed topic information.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopicDetail'
+        '404':
+          description: Topic not found.
+
+  /politicians:
+    get:
+      summary: List all politicians
+      description: Retrieves a list of all politicians.
+      parameters:
+        - in: query
+          name: ids
+          schema:
+            type: string
+          description: Comma-separated list of IDs to filter by.
+      responses:
+        '200':
+          description: A list of politicians.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Politician'
+
+  /politicians/{id}:
+    get:
+      summary: Get a specific politician
+      description: Retrieves detailed information about a politician.
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: The ID of the politician.
+      responses:
+        '200':
+          description: Detailed politician information.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PoliticianDetail'
+        '404':
+          description: Politician not found.
+
+  /speeches:
+    get:
+      summary: List all speeches
+      description: Retrieves a list of full speeches metadata.
+      responses:
+        '200':
+          description: A list of speeches.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FullSpeech'
+
+  /speeches/{id}:
+    get:
+      summary: Get a specific speech
+      description: Retrieves the full transcript and metadata for a specific speech.
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: The ID of the speech.
+      responses:
+        '200':
+          description: Detailed speech information including speaker object.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpeechDetail'
+        '404':
+          description: Speech not found.
+
+  /campaigns:
+    get:
+      summary: List all campaigns
+      description: Retrieves a list of the user's advocacy campaigns.
+      responses:
+        '200':
+          description: A list of campaigns.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Campaign'
+    post:
+      summary: Create a new campaign
+      description: Creates a new campaign.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignInput'
+      responses:
+        '201':
+          description: Campaign created successfully.
+
+  /campaigns/{id}:
+    get:
+      summary: Get a specific campaign
+      description: Retrieves details of a specific campaign.
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: The ID of the campaign.
+      responses:
+        '200':
+          description: Campaign details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '404':
+          description: Campaign not found.
+
+  /alerts:
+    get:
+      summary: List all alerts
+      description: Retrieves a list of notifications.
+      responses:
+        '200':
+          description: A list of alerts.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Alert'
+
+  /reports:
+    get:
+      summary: List all reports
+      description: Retrieves a list of generated reports.
+      responses:
+        '200':
+          description: A list of reports.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Report'
+
+  /dashboard:
+    get:
+      summary: Get dashboard data
+      description: Retrieves aggregated statistics and trend data.
+      responses:
+        '200':
+          description: Dashboard data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardData'
+
+  /bundestag/status:
+    get:
+      summary: Get Bundestag session status
+      description: Retrieves the current live status of the Bundestag.
+      responses:
+        '200':
+          description: Session status information.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionStatus'
+
+  /search:
+    get:
+      summary: Global search
+      description: Searches across topics, politicians, and campaigns.
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+          description: The search query string.
+      responses:
+        '200':
+          description: Search results grouped by category.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResults'
+
+components:
+  schemas:
+    Topic:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        category:
+          type: string
+        relevance:
+          type: integer
+        trend:
+          type: string
+          enum: [up, stable, down]
+
+    TrendDataPoint:
+      type: object
+      properties:
+        date:
+          type: string
+        value:
+          type: number
+
+    Legislation:
+      type: object
+      properties:
+        id:
+          type: string
+        topicId:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+        date:
+          type: string
+          format: date-time
+
+    SpeechSnippet:
+      type: object
+      properties:
+        id:
+          type: string
+        topicId:
+          type: string
+        speaker:
+          type: string
+        party:
+          type: string
+        text:
+          type: string
+        date:
+          type: string
+          format: date-time
+        sentiment:
+          type: string
+          enum: ["stark positiv", "positiv", "neutral", "negativ", "stark negativ"]
+        fullSpeechId:
+          type: string
+
+    PartyPosition:
+      type: object
+      properties:
+        party:
+          type: string
+        relevance:
+          type: number
+        sentiment:
+          type: number
+
+    TopTopic:
+      type: object
+      properties:
+        topic:
+          type: string
+        stance:
+          type: string
+
+    Politician:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        party:
+          type: string
+        role:
+          type: string
+        region:
+          type: string
+        age:
+          type: integer
+        gender:
+          type: string
+        volatility:
+          type: string
+        contributionFactor:
+          type: number
+        image:
+          type: string
+        topTopics:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopTopic'
+        similar:
+          type: array
+          items:
+            type: string
+
+    TopicDetail:
+      allOf:
+        - $ref: '#/components/schemas/Topic'
+        - type: object
+          properties:
+            legislation:
+              type: array
+              items:
+                $ref: '#/components/schemas/Legislation'
+            speeches:
+              type: array
+              items:
+                $ref: '#/components/schemas/SpeechSnippet'
+            trendData:
+              type: array
+              items:
+                $ref: '#/components/schemas/TrendDataPoint'
+            positionData:
+              type: array
+              items:
+                $ref: '#/components/schemas/TrendDataPoint'
+            partyPositions:
+              type: array
+              items:
+                $ref: '#/components/schemas/PartyPosition'
+            stakeholders:
+              type: object
+              properties:
+                pro:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Politician'
+                contra:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Politician'
+
+    FullSpeech:
+      type: object
+      properties:
+        id:
+          type: string
+        speakerId:
+          type: string
+        title:
+          type: string
+        date:
+          type: string
+          format: date-time
+        duration:
+          type: string
+        type:
+          type: string
+        session:
+          type: string
+        topicId:
+          type: string
+        relatedTopics:
+          type: array
+          items:
+            type: string
+        content:
+          type: string
+        sentiment:
+          type: string
+          enum: ["stark positiv", "positiv", "neutral", "negativ", "stark negativ"]
+        sourceUrl:
+          type: string
+
+    PoliticianDetail:
+      allOf:
+        - $ref: '#/components/schemas/Politician'
+        - type: object
+          properties:
+            speeches:
+              type: array
+              items:
+                $ref: '#/components/schemas/FullSpeech'
+            activityData:
+              type: array
+              items:
+                $ref: '#/components/schemas/TrendDataPoint'
+
+    SpeechDetail:
+      allOf:
+        - $ref: '#/components/schemas/FullSpeech'
+        - type: object
+          properties:
+            speaker:
+              $ref: '#/components/schemas/Politician'
+            topic:
+              $ref: '#/components/schemas/Topic'
+
+    Campaign:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        goal:
+          type: string
+        topicId:
+          type: string
+        progress:
+          type: integer
+        lastUpdate:
+          type: string
+          format: date-time
+
+    CampaignInput:
+      type: object
+      properties:
+        name:
+          type: string
+        topicId:
+          type: string
+        goal:
+          type: string
+
+    NotificationDetails:
+      type: object
+      properties:
+        before:
+          type: string
+        after:
+          type: string
+        reason:
+          type: string
+        source:
+          type: string
+        speechId:
+          type: string
+
+    Alert:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        message:
+          type: string
+        type:
+          type: string
+          enum: [alert, info, success]
+        category:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        details:
+          $ref: '#/components/schemas/NotificationDetails'
+
+    DashboardStats:
+      type: object
+      properties:
+        name:
+          type: string
+        value:
+          type: string
+        change:
+          type: string
+        changeType:
+          type: string
+
+    DashboardData:
+      type: object
+      properties:
+        stats:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardStats'
+        trendData:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrendDataPoint'
+        alerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Alert'
+
+    SessionStatus:
+      type: object
+      properties:
+        wahlperiode:
+          type: integer
+        sitzungsnummer:
+          type: string
+        datum:
+          type: string
+          format: date-time
+        titel:
+          type: string
+        live:
+          type: boolean
+        label:
+          type: string
+        nextDatum:
+          type: string
+          format: date-time
+          nullable: true
+        error:
+          type: boolean
+
+    SearchResults:
+      type: object
+      properties:
+        topics:
+          type: array
+          items:
+            $ref: '#/components/schemas/Topic'
+        politicians:
+          type: array
+          items:
+            $ref: '#/components/schemas/Politician'
+        campaigns:
+          type: array
+          items:
+            $ref: '#/components/schemas/Campaign'
+
+    Report:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        date:
+          type: string
+          format: date-time
+        size:
+          type: string
