@@ -3,8 +3,10 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 	api "plenartrend/crud/src/openAPI"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -15,7 +17,13 @@ func main() {
 		log.Fatal("Error loading .env file")
 	}
 
-	server := NewServer()
+	db, err := sqlx.Connect("postgres", os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+
+	server := NewServer(db)
 	r := http.NewServeMux()
 	h := api.HandlerFromMux(server, r)
 
