@@ -50,16 +50,13 @@ func buildDatabaseURL() string {
 }
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
-	}
+	_ = godotenv.Load() // Do not fail if .env is missing, as we set the environment variables directly in production
 
 	dbURL := buildDatabaseURL()
 
 	var db *sqlx.DB
 	for true {
-		db, err = sqlx.Connect("postgres", dbURL)
+		db, err := sqlx.Connect("postgres", dbURL)
 		if err == nil {
 			defer db.Close()
 			break
