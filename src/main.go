@@ -55,8 +55,9 @@ func main() {
 	dbURL := buildDatabaseURL()
 
 	var db *sqlx.DB
+	var err error
 	for true {
-		db, err := sqlx.Connect("postgres", dbURL)
+		db, err = sqlx.Connect("postgres", dbURL)
 		if err == nil {
 			defer db.Close()
 			break
