@@ -18,6 +18,11 @@ func NewServer(db *sqlx.DB) *Server {
 	return &Server{db: db}
 }
 
+func (s *Server) GetHealth(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("Server healthy!"))
+}
+
 func (s *Server) GetAlerts(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

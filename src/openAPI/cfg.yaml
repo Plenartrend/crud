@@ -4,3 +4,6 @@ output: API-server.gen.go
 generate:
   std-http-server: true
   models: true
+output-options:
+  overlay:
+    path: overlay.yaml

@@ -1,0 +1,13 @@
+overlay: 1.0.0
+info:
+  title: Add health endpoint
+  version: 1.0.0
+actions:
+  - target: $.paths
+    update:
+      /health:
+        get:
+          summary: Health check endpoint
+          responses:
+            "200":
+              description: Server healthy!

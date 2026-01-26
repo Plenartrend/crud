@@ -329,6 +329,9 @@ type ServerInterface interface {
 	// Get dashboard data
 	// (GET /dashboard)
 	GetDashboard(w http.ResponseWriter, r *http.Request)
+	// Health check endpoint
+	// (GET /health)
+	GetHealth(w http.ResponseWriter, r *http.Request)
 	// List all politicians
 	// (GET /politicians)
 	GetPoliticians(w http.ResponseWriter, r *http.Request, params GetPoliticiansParams)
@@ -450,6 +453,20 @@ func (siw *ServerInterfaceWrapper) GetDashboard(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetDashboard(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetHealth operation middleware
+func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetHealth(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -756,6 +773,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/campaigns", wrapper.PostCampaigns)
 	m.HandleFunc("GET "+options.BaseURL+"/campaigns/{id}", wrapper.GetCampaignsId)
 	m.HandleFunc("GET "+options.BaseURL+"/dashboard", wrapper.GetDashboard)
+	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.GetHealth)
 	m.HandleFunc("GET "+options.BaseURL+"/politicians", wrapper.GetPoliticians)
 	m.HandleFunc("GET "+options.BaseURL+"/politicians/{id}", wrapper.GetPoliticiansId)
 	m.HandleFunc("GET "+options.BaseURL+"/reports", wrapper.GetReports)
