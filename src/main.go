@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	api "plenartrend/crud/src/openAPI"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
@@ -13,8 +14,6 @@ import (
 )
 
 func buildDatabaseURL() string {
-
-	// Otherwise, construct from separate variables (all required)
 	host := os.Getenv("DATABASE_HOST")
 	if host == "" {
 		log.Fatal("DATABASE_HOST is required")
@@ -40,11 +39,9 @@ func buildDatabaseURL() string {
 		log.Fatal("DATABASE_NAME is required")
 	}
 
-	// Build connection string
 	connStr := fmt.Sprintf("postgres://%s:%s@%s:%s/%s",
 		user, password, host, port, dbname)
 
-	// Add sslmode parameter only if DATABASE_SSLMODE is set
 	if sslmode := os.Getenv("DATABASE_SSLMODE"); sslmode != "" {
 		connStr += fmt.Sprintf("?sslmode=%s", sslmode)
 	}
@@ -53,14 +50,23 @@ func buildDatabaseURL() string {
 }
 
 func main() {
-	_ = godotenv.Load()
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
+	}
 
 	dbURL := buildDatabaseURL()
-	db, err := sqlx.Connect("postgres", dbURL)
-	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+
+	var db *sqlx.DB
+	for true {
+		db, err = sqlx.Connect("postgres", dbURL)
+		if err == nil {
+			defer db.Close()
+			break
+		}
+		log.Printf("Failed to connect to database: %v", err)
+		time.Sleep(time.Second)
 	}
-	defer db.Close()
 
 	server := NewServer(db)
 	r := http.NewServeMux()
