@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	api "plenartrend/crud/src/openAPI"
+	"strconv"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
@@ -65,16 +66,15 @@ func (s *Server) GetDashboard(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func (s *Server) GetPoliticians(w http.ResponseWriter, r *http.Request, params api.GetPoliticiansParams) {
+func (s *Server) getPoliticians(ids []string) ([]api.Politician, error) {
 	politicians := []api.Politician{}
 
 	var args []any
 	var err error
 
 	// TODO we don't have a lot of this data
-	// TODO use actual full titles of persons
 	// TODO don't hardcode election period -> should probably come from params
-	// TODO only return one record per person (currently one per role) -> Which role to pick?
+	// TODO only return one record per person (currently one per role)? -> Which role to pick?
 	query := `
 		SELECT
 			1 as age,
@@ -82,7 +82,7 @@ func (s *Server) GetPoliticians(w http.ResponseWriter, r *http.Request, params a
 			'd' as gender,
 			r.id,
 			'null' as image,
-			(r.first_name || ' ' || r.last_name) as name,
+			r.title as name,
 			pg.name as party,
 			'Deutschland' as region,
 			r.name as role,
@@ -94,22 +94,32 @@ func (s *Server) GetPoliticians(w http.ResponseWriter, r *http.Request, params a
 			AND r.group_id = pg.id
 	`
 
-	if params.Ids != nil && *params.Ids != "" {
-		ids := strings.Split(*params.Ids, ",")
+	if len(ids) > 0 {
 		log.Printf("Filtering politicians by IDs: %v", ids)
 
 		query, args, err = sqlx.In(query+" AND r.person_id IN (?)", ids)
 
 		if err != nil {
 			log.Printf("Failed to build query: %v", err)
-			http.Error(w, "Failed to build query", http.StatusInternalServerError)
-			return
+			return nil, err
 		}
 
 		query = s.db.Rebind(query)
 	}
 
 	err = s.db.Select(&politicians, query, args...)
+	return politicians, err
+}
+
+func (s *Server) GetPoliticians(w http.ResponseWriter, r *http.Request, params api.GetPoliticiansParams) {
+	politicians := []api.Politician{}
+	ids := []string{}
+
+	if params.Ids != nil && *params.Ids != "" {
+		ids = strings.Split(*params.Ids, ",")
+	}
+
+	politicians, err := s.getPoliticians(ids)
 	if err != nil {
 		log.Printf("Failed to query politicians: %v", err)
 		http.Error(w, "Failed to query politicians", http.StatusInternalServerError)
@@ -122,10 +132,23 @@ func (s *Server) GetPoliticians(w http.ResponseWriter, r *http.Request, params a
 }
 
 func (s *Server) GetPoliticiansId(w http.ResponseWriter, r *http.Request, id string) {
+	politicians, err := s.getPoliticians([]string{id})
+
+	if err != nil {
+		log.Printf("Failed to query politician: %v", err)
+		http.Error(w, "Failed to query politician", http.StatusInternalServerError)
+		return
+	}
+
+	if len(politicians) == 0 {
+		log.Printf("Politician not found: %v", id)
+		http.Error(w, "Politician not found", http.StatusNotFound)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	resp := api.PoliticianDetail{}
-	_ = json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(politicians[0])
 }
 
 func (s *Server) GetReports(w http.ResponseWriter, r *http.Request) {
@@ -142,18 +165,81 @@ func (s *Server) GetSearch(w http.ResponseWriter, r *http.Request, params api.Ge
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+func (s *Server) getSpeeches(id *int) ([]api.FullSpeech, error) {
+	speeches := []api.FullSpeech{}
+
+	idSelector := ""
+
+	if id != nil {
+		idSelector = " AND a.id = " + strconv.Itoa(*id)
+	}
+
+	// TODO we don't have a lot of this data
+	err := s.db.Select(&speeches, `
+		SELECT
+			a.text as content,
+			p.date as date,
+			null as duration,
+			a.id as id,
+			null as relatedTopics,
+			null as sentiment,
+			null as session,
+			p.url as sourceUrl,
+			a.role_id as speakerId,
+			null as title,
+			null as topicId,
+			a.type as type
+		FROM activities a, protocols p
+		WHERE a.protocol_id = p.id
+			AND a.type LIKE 'Rede%'
+			`+idSelector+`
+	`)
+
+	return speeches, err
+}
+
 func (s *Server) GetSpeeches(w http.ResponseWriter, r *http.Request) {
+	speeches := []api.FullSpeech{}
+
+	speeches, err := s.getSpeeches(nil)
+
+	if err != nil {
+		log.Printf("Failed to query speeches: %v", err)
+		http.Error(w, "Failed to query speeches", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	resp := []api.FullSpeech{}
-	_ = json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(speeches)
 }
 
 func (s *Server) GetSpeechesId(w http.ResponseWriter, r *http.Request, id string) {
+	speechID, err := strconv.Atoi(id)
+
+	if err != nil {
+		log.Printf("Invalid speech ID: %v", err)
+		http.Error(w, "Invalid speech ID", http.StatusBadRequest)
+		return
+	}
+
+	speeches, err := s.getSpeeches(&speechID)
+
+	if err != nil {
+		log.Printf("Failed to query speech: %v", err)
+		http.Error(w, "Failed to query speech", http.StatusInternalServerError)
+		return
+	}
+
+	if len(speeches) == 0 {
+		log.Printf("Speech not found: %v", speechID)
+		http.Error(w, "Speech not found", http.StatusNotFound)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	resp := api.SpeechDetail{}
-	_ = json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(speeches[0])
 }
 
 func (s *Server) GetTopics(w http.ResponseWriter, r *http.Request) {
