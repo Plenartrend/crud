@@ -82,7 +82,7 @@ func (s *Server) getPoliticians(ids []string) ([]api.Politician, error) {
 			'd' as gender,
 			r.id,
 			'null' as image,
-			r.title as name,
+			COALESCE(r.title, r.first_name || ' ' || COALESCE(r.name_suffix || ' ', '') || r.last_name || ', ' || r.name) as name,
 			pg.name as party,
 			'Deutschland' as region,
 			r.name as role,
@@ -159,10 +159,64 @@ func (s *Server) GetReports(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) GetSearch(w http.ResponseWriter, r *http.Request, params api.GetSearchParams) {
+	var campaigns []api.Campaign
+	// TODO add once we have campaigns in the DB
+	/*
+		err := s.db.Select(&campaigns, `
+			SELECT *
+			FROM campaigns
+		`)
+		if err != nil {
+			log.Printf("Failed to query campaigns: %v", err)
+			http.Error(w, "Failed to query campaigns", http.StatusInternalServerError)
+			return
+		}
+	*/
+
+	politicians, err := s.getPoliticians(nil)
+	if err != nil {
+		log.Printf("Failed to query politicians: %v", err)
+		http.Error(w, "Failed to query politicians", http.StatusInternalServerError)
+		return
+	}
+
+	var filteredPoliticians []api.Politician
+	if params.Q == nil || *params.Q == "" {
+		filteredPoliticians = politicians
+	} else {
+		for _, p := range politicians {
+			if strings.Contains(strings.ToLower(*p.Name), strings.ToLower(*params.Q)) {
+				filteredPoliticians = append(filteredPoliticians, p)
+			}
+		}
+	}
+
+	topics, err := s.getTopics(nil)
+	if err != nil {
+		log.Printf("Failed to query topics: %v", err)
+		http.Error(w, "Failed to query topics", http.StatusInternalServerError)
+		return
+	}
+
+	var filteredTopics []api.Topic
+	if params.Q == nil || *params.Q == "" {
+		filteredTopics = topics
+	} else {
+		for _, t := range topics {
+			if strings.Contains(strings.ToLower(*t.Title), strings.ToLower(*params.Q)) {
+				filteredTopics = append(filteredTopics, t)
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	resp := api.SearchResults{}
-	_ = json.NewEncoder(w).Encode(resp)
+	searchResults := api.SearchResults{
+		Campaigns:   &campaigns,
+		Politicians: &filteredPoliticians,
+		Topics:      &filteredTopics,
+	}
+	_ = json.NewEncoder(w).Encode(searchResults)
 }
 
 func (s *Server) getSpeeches(id *int) ([]api.FullSpeech, error) {
@@ -242,14 +296,67 @@ func (s *Server) GetSpeechesId(w http.ResponseWriter, r *http.Request, id string
 	_ = json.NewEncoder(w).Encode(speeches[0])
 }
 
+func (s *Server) getTopics(id *int) ([]api.Topic, error) {
+	topics := []api.Topic{}
+
+	idSelector := ""
+
+	if id != nil {
+		idSelector = "WHERE a.id = " + strconv.Itoa(*id)
+	}
+
+	// TODO we don't have a lot of this data
+	err := s.db.Select(&topics, `
+		SELECT
+			null as category,
+			id as id,
+			null as relevance,
+			name as title,
+			null as trend
+		FROM topics
+		`+idSelector+`
+	`)
+
+	return topics, err
+}
+
 func (s *Server) GetTopics(w http.ResponseWriter, r *http.Request) {
+	topics, err := s.getTopics(nil)
+
+	if err != nil {
+		log.Printf("Failed to query topics: %v", err)
+		http.Error(w, "Failed to query topics", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	resp := []api.Topic{}
-	_ = json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(topics)
 }
 
 func (s *Server) GetTopicsId(w http.ResponseWriter, r *http.Request, id string) {
+	topicID, err := strconv.Atoi(id)
+
+	if err != nil {
+		log.Printf("Invalid topic ID: %v", err)
+		http.Error(w, "Invalid topic ID", http.StatusBadRequest)
+		return
+	}
+
+	topics, err := s.getTopics(&topicID)
+
+	if err != nil {
+		log.Printf("Failed to query topic: %v", err)
+		http.Error(w, "Failed to query topic", http.StatusInternalServerError)
+		return
+	}
+
+	if len(topics) == 0 {
+		log.Printf("Topic not found: %v", topicID)
+		http.Error(w, "Topic not found", http.StatusNotFound)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	resp := api.TopicDetail{}
