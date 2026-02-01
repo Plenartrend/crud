@@ -1,7 +1,7 @@
 openapi: 3.0.0
 info:
   title: Plenartrend API
-  description: API documentation for the Plenartrend application, providing access to political topics, politicians, speeches, campaigns, and alerts.
+  description: API documentation for the Plenartrend application, providing access to political topics, politicians, speeches, and alerts.
   version: 1.0.0
 servers:
   - url: http://plenartrend.de/api/v1
@@ -11,16 +11,17 @@ paths:
   /topics:
     get:
       summary: List all topics
-      description: Retrieves a list of all political topics.
+      description: Retrieves a paginated list of all political topics, each with a relevance and sentiment score.
+      parameters:
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: A list of topics.
+          description: Paginated list of topics.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Topic'
+                $ref: '#/components/schemas/PaginatedTopics'
 
   /topics/{id}:
     get:
@@ -119,53 +120,6 @@ paths:
         '404':
           description: Speech not found.
 
-  /campaigns:
-    get:
-      summary: List all campaigns
-      description: Retrieves a list of the user's advocacy campaigns.
-      responses:
-        '200':
-          description: A list of campaigns.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Campaign'
-    post:
-      summary: Create a new campaign
-      description: Creates a new campaign.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CampaignInput'
-      responses:
-        '201':
-          description: Campaign created successfully.
-
-  /campaigns/{id}:
-    get:
-      summary: Get a specific campaign
-      description: Retrieves details of a specific campaign.
-      parameters:
-        - in: path
-          name: id
-          schema:
-            type: string
-          required: true
-          description: The ID of the campaign.
-      responses:
-        '200':
-          description: Campaign details.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Campaign'
-        '404':
-          description: Campaign not found.
-
   /alerts:
     get:
       summary: List all alerts
@@ -221,7 +175,7 @@ paths:
   /search:
     get:
       summary: Global search
-      description: Searches across topics, politicians, and campaigns.
+      description: Searches across topics and politicians.
       parameters:
         - in: query
           name: q
@@ -236,8 +190,102 @@ paths:
               schema:
                 $ref: '#/components/schemas/SearchResults'
 
+  /analysis/time-series:
+    get:
+      summary: Time series
+      description: Returns time-series analysis (relevance and sentiment over time) as an additional query. Optional filters for time range, topic_id, person_id, and group_id.
+      parameters:
+        - $ref: '#/components/parameters/TimeRangeFilter'
+        - in: query
+          name: topic_id
+          schema:
+            type: integer
+          description: Filter by topic ID.
+        - in: query
+          name: person_id
+          schema:
+            type: integer
+          description: Filter by person (politician) ID.
+        - in: query
+          name: group_id
+          schema:
+            type: integer
+          description: Filter by parliamentary group ID.
+      responses:
+        '200':
+          description: Time-series analysis data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisOverTimeResponse'
+
 components:
+  parameters:
+    PageSize:
+      in: query
+      name: page_size
+      required: false
+      description: Number of items per page. Default is 20, maximum is 100.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Offset:
+      in: query
+      name: offset
+      required: false
+      description: Number of items to skip (for pagination). Default is 0.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    TimeRangeFilter:
+      in: query
+      name: time_range
+      required: false
+      description: Time window for the time series. Omit for server default.
+      schema:
+        $ref: '#/components/schemas/TimeRangeFilter'
   schemas:
+    PaginationMeta:
+      type: object
+      description: Standard pagination metadata included in paginated responses.
+      properties:
+        total_items:
+          type: integer
+          description: Total number of items across all pages (sent by backend).
+        page:
+          type: integer
+          minimum: 1
+          description: Current page (1-based), computed by backend from offset and page_size.
+        page_size:
+          type: integer
+          minimum: 1
+          description: Number of items per page (sent by frontend, echoed by backend).
+
+    PaginatedTopics:
+      type: object
+      description: Paginated response containing a page of topics and pagination metadata.
+      required: [data, total_items, page, page_size]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Topic'
+          description: Page of topics.
+        total_items:
+          type: integer
+          description: Total number of topics across all pages (sent by backend).
+        page:
+          type: integer
+          minimum: 1
+          description: Current page (1-based), computed by backend from offset and page_size.
+        page_size:
+          type: integer
+          minimum: 1
+          description: Number of items per page (sent by frontend, echoed by backend).
+
     Topic:
       type: object
       properties:
@@ -248,10 +296,57 @@ components:
         category:
           type: string
         relevance:
-          type: integer
+          type: number
+          description: Relevance score for the topic.
+        sentiment:
+          type: number
+          description: Aggregated sentiment score for the topic, -1 to 1 (display as -100 to +100). Negative = negative sentiment, positive = positive sentiment, 0 = neutral.
         trend:
           type: string
           enum: [up, stable, down]
+
+    TimeRangeFilter:
+      type: string
+      enum:
+        - last_month
+        - last_6_months
+        - ytd
+        - last_year
+        - last_2_years
+        - last_5_years
+        - max
+      description: |
+        Time window for time-series data. Supported values:
+        - last_month - last 30 days
+        - last_6_months - last 6 months
+        - ytd - year to date
+        - last_year - last 12 months
+        - last_2_years - last 2 years
+        - last_5_years - last 5 years
+        - max - all available data
+
+    AnalysisOverTimePoint:
+      type: object
+      properties:
+        period:
+          type: string
+          format: date
+          description: Start of the time bucket (e.g. week or month).
+        relevance:
+          type: number
+          description: Aggregated relevance for the period.
+        sentiment:
+          type: number
+          description: Aggregated sentiment for the period.
+
+    AnalysisOverTimeResponse:
+      type: object
+      properties:
+        series:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalysisOverTimePoint'
+          description: Time-ordered data points (relevance and sentiment per period).
 
     TrendDataPoint:
       type: object
@@ -260,21 +355,6 @@ components:
           type: string
         value:
           type: number
-
-    Legislation:
-      type: object
-      properties:
-        id:
-          type: string
-        topicId:
-          type: string
-        title:
-          type: string
-        status:
-          type: string
-        date:
-          type: string
-          format: date-time
 
     SpeechSnippet:
       type: object
@@ -353,10 +433,6 @@ components:
         - $ref: '#/components/schemas/Topic'
         - type: object
           properties:
-            legislation:
-              type: array
-              items:
-                $ref: '#/components/schemas/Legislation'
             speeches:
               type: array
               items:
@@ -440,35 +516,6 @@ components:
               $ref: '#/components/schemas/Politician'
             topic:
               $ref: '#/components/schemas/Topic'
-
-    Campaign:
-      type: object
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        status:
-          type: string
-        goal:
-          type: string
-        topicId:
-          type: string
-        progress:
-          type: integer
-        lastUpdate:
-          type: string
-          format: date-time
-
-    CampaignInput:
-      type: object
-      properties:
-        name:
-          type: string
-        topicId:
-          type: string
-        goal:
-          type: string
 
     NotificationDetails:
       type: object
@@ -566,10 +613,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Politician'
-        campaigns:
-          type: array
-          items:
-            $ref: '#/components/schemas/Campaign'
 
     Report:
       type: object

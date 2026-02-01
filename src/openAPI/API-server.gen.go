@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // Defines values for AlertType.
@@ -47,6 +48,17 @@ const (
 	StarkPositiv SpeechSnippetSentiment = "stark positiv"
 )
 
+// Defines values for TimeRangeFilter.
+const (
+	Last2Years  TimeRangeFilter = "last_2_years"
+	Last5Years  TimeRangeFilter = "last_5_years"
+	Last6Months TimeRangeFilter = "last_6_months"
+	LastMonth   TimeRangeFilter = "last_month"
+	LastYear    TimeRangeFilter = "last_year"
+	Max         TimeRangeFilter = "max"
+	Ytd         TimeRangeFilter = "ytd"
+)
+
 // Defines values for TopicTrend.
 const (
 	TopicTrendDown   TopicTrend = "down"
@@ -75,22 +87,22 @@ type Alert struct {
 // AlertType defines model for Alert.Type.
 type AlertType string
 
-// Campaign defines model for Campaign.
-type Campaign struct {
-	Goal       *string    `json:"goal,omitempty"`
-	Id         *string    `json:"id,omitempty"`
-	LastUpdate *time.Time `json:"lastUpdate,omitempty"`
-	Name       *string    `json:"name,omitempty"`
-	Progress   *int       `json:"progress,omitempty"`
-	Status     *string    `json:"status,omitempty"`
-	TopicId    *string    `json:"topicId,omitempty"`
+// AnalysisOverTimePoint defines model for AnalysisOverTimePoint.
+type AnalysisOverTimePoint struct {
+	// Period Start of the time bucket (e.g. week or month).
+	Period *openapi_types.Date `json:"period,omitempty"`
+
+	// Relevance Aggregated relevance for the period.
+	Relevance *float32 `json:"relevance,omitempty"`
+
+	// Sentiment Aggregated sentiment for the period.
+	Sentiment *float32 `json:"sentiment,omitempty"`
 }
 
-// CampaignInput defines model for CampaignInput.
-type CampaignInput struct {
-	Goal    *string `json:"goal,omitempty"`
-	Name    *string `json:"name,omitempty"`
-	TopicId *string `json:"topicId,omitempty"`
+// AnalysisOverTimeResponse defines model for AnalysisOverTimeResponse.
+type AnalysisOverTimeResponse struct {
+	// Series Time-ordered data points (relevance and sentiment per period).
+	Series *[]AnalysisOverTimePoint `json:"series,omitempty"`
 }
 
 // DashboardData defines model for DashboardData.
@@ -127,15 +139,6 @@ type FullSpeech struct {
 // FullSpeechSentiment defines model for FullSpeech.Sentiment.
 type FullSpeechSentiment string
 
-// Legislation defines model for Legislation.
-type Legislation struct {
-	Date    *time.Time `json:"date,omitempty"`
-	Id      *string    `json:"id,omitempty"`
-	Status  *string    `json:"status,omitempty"`
-	Title   *string    `json:"title,omitempty"`
-	TopicId *string    `json:"topicId,omitempty"`
-}
-
 // NotificationDetails defines model for NotificationDetails.
 type NotificationDetails struct {
 	After    *string `json:"after,omitempty"`
@@ -143,6 +146,21 @@ type NotificationDetails struct {
 	Reason   *string `json:"reason,omitempty"`
 	Source   *string `json:"source,omitempty"`
 	SpeechId *string `json:"speechId,omitempty"`
+}
+
+// PaginatedTopics Paginated response containing a page of topics and pagination metadata.
+type PaginatedTopics struct {
+	// Data Page of topics.
+	Data []Topic `json:"data"`
+
+	// Page Current page (1-based), computed by backend from offset and page_size.
+	Page int `json:"page"`
+
+	// PageSize Number of items per page (sent by frontend, echoed by backend).
+	PageSize int `json:"page_size"`
+
+	// TotalItems Total number of topics across all pages (sent by backend).
+	TotalItems int `json:"total_items"`
 }
 
 // PartyPosition defines model for PartyPosition.
@@ -196,7 +214,6 @@ type Report struct {
 
 // SearchResults defines model for SearchResults.
 type SearchResults struct {
-	Campaigns   *[]Campaign   `json:"campaigns,omitempty"`
 	Politicians *[]Politician `json:"politicians,omitempty"`
 	Topics      *[]Topic      `json:"topics,omitempty"`
 }
@@ -249,6 +266,16 @@ type SpeechSnippet struct {
 // SpeechSnippetSentiment defines model for SpeechSnippet.Sentiment.
 type SpeechSnippetSentiment string
 
+// TimeRangeFilter Time window for time-series data. Supported values:
+// - last_month - last 30 days
+// - last_6_months - last 6 months
+// - ytd - year to date
+// - last_year - last 12 months
+// - last_2_years - last 2 years
+// - last_5_years - last 5 years
+// - max - all available data
+type TimeRangeFilter string
+
 // TopTopic defines model for TopTopic.
 type TopTopic struct {
 	Stance *string `json:"stance,omitempty"`
@@ -257,9 +284,14 @@ type TopTopic struct {
 
 // Topic defines model for Topic.
 type Topic struct {
-	Category  *string     `json:"category,omitempty"`
-	Id        *string     `json:"id,omitempty"`
-	Relevance *int        `json:"relevance,omitempty"`
+	Category *string `json:"category,omitempty"`
+	Id       *string `json:"id,omitempty"`
+
+	// Relevance Relevance score for the topic.
+	Relevance *float32 `json:"relevance,omitempty"`
+
+	// Sentiment Aggregated sentiment score for the topic, -1 to 1 (display as -100 to +100). Negative = negative sentiment, positive = positive sentiment, 0 = neutral.
+	Sentiment *float32    `json:"sentiment,omitempty"`
 	Title     *string     `json:"title,omitempty"`
 	Trend     *TopicTrend `json:"trend,omitempty"`
 }
@@ -271,12 +303,16 @@ type TopicTrend string
 type TopicDetail struct {
 	Category       *string           `json:"category,omitempty"`
 	Id             *string           `json:"id,omitempty"`
-	Legislation    *[]Legislation    `json:"legislation,omitempty"`
 	PartyPositions *[]PartyPosition  `json:"partyPositions,omitempty"`
 	PositionData   *[]TrendDataPoint `json:"positionData,omitempty"`
-	Relevance      *int              `json:"relevance,omitempty"`
-	Speeches       *[]SpeechSnippet  `json:"speeches,omitempty"`
-	Stakeholders   *struct {
+
+	// Relevance Relevance score for the topic.
+	Relevance *float32 `json:"relevance,omitempty"`
+
+	// Sentiment Aggregated sentiment score for the topic, -1 to 1 (display as -100 to +100). Negative = negative sentiment, positive = positive sentiment, 0 = neutral.
+	Sentiment    *float32         `json:"sentiment,omitempty"`
+	Speeches     *[]SpeechSnippet `json:"speeches,omitempty"`
+	Stakeholders *struct {
 		Contra *[]Politician `json:"contra,omitempty"`
 		Pro    *[]Politician `json:"pro,omitempty"`
 	} `json:"stakeholders,omitempty"`
@@ -294,6 +330,27 @@ type TrendDataPoint struct {
 	Value *float32 `json:"value,omitempty"`
 }
 
+// Offset defines model for Offset.
+type Offset = int
+
+// PageSize defines model for PageSize.
+type PageSize = int
+
+// GetAnalysisTimeSeriesParams defines parameters for GetAnalysisTimeSeries.
+type GetAnalysisTimeSeriesParams struct {
+	// TimeRange Time window for the time series. Omit for server default.
+	TimeRange *TimeRangeFilter `form:"time_range,omitempty" json:"time_range,omitempty"`
+
+	// TopicId Filter by topic ID.
+	TopicId *int `form:"topic_id,omitempty" json:"topic_id,omitempty"`
+
+	// PersonId Filter by person (politician) ID.
+	PersonId *int `form:"person_id,omitempty" json:"person_id,omitempty"`
+
+	// GroupId Filter by parliamentary group ID.
+	GroupId *int `form:"group_id,omitempty" json:"group_id,omitempty"`
+}
+
 // GetPoliticiansParams defines parameters for GetPoliticians.
 type GetPoliticiansParams struct {
 	// Ids Comma-separated list of IDs to filter by.
@@ -306,26 +363,26 @@ type GetSearchParams struct {
 	Q *string `form:"q,omitempty" json:"q,omitempty"`
 }
 
-// PostCampaignsJSONRequestBody defines body for PostCampaigns for application/json ContentType.
-type PostCampaignsJSONRequestBody = CampaignInput
+// GetTopicsParams defines parameters for GetTopics.
+type GetTopicsParams struct {
+	// PageSize Number of items per page. Default is 20, maximum is 100.
+	PageSize *PageSize `form:"page_size,omitempty" json:"page_size,omitempty"`
+
+	// Offset Number of items to skip (for pagination). Default is 0.
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// List all alerts
 	// (GET /alerts)
 	GetAlerts(w http.ResponseWriter, r *http.Request)
+	// Time series
+	// (GET /analysis/time-series)
+	GetAnalysisTimeSeries(w http.ResponseWriter, r *http.Request, params GetAnalysisTimeSeriesParams)
 	// Get Bundestag session status
 	// (GET /bundestag/status)
 	GetBundestagStatus(w http.ResponseWriter, r *http.Request)
-	// List all campaigns
-	// (GET /campaigns)
-	GetCampaigns(w http.ResponseWriter, r *http.Request)
-	// Create a new campaign
-	// (POST /campaigns)
-	PostCampaigns(w http.ResponseWriter, r *http.Request)
-	// Get a specific campaign
-	// (GET /campaigns/{id})
-	GetCampaignsId(w http.ResponseWriter, r *http.Request, id string)
 	// Get dashboard data
 	// (GET /dashboard)
 	GetDashboard(w http.ResponseWriter, r *http.Request)
@@ -352,7 +409,7 @@ type ServerInterface interface {
 	GetSpeechesId(w http.ResponseWriter, r *http.Request, id string)
 	// List all topics
 	// (GET /topics)
-	GetTopics(w http.ResponseWriter, r *http.Request)
+	GetTopics(w http.ResponseWriter, r *http.Request, params GetTopicsParams)
 	// Get a specific topic
 	// (GET /topics/{id})
 	GetTopicsId(w http.ResponseWriter, r *http.Request, id string)
@@ -381,64 +438,62 @@ func (siw *ServerInterfaceWrapper) GetAlerts(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// GetAnalysisTimeSeries operation middleware
+func (siw *ServerInterfaceWrapper) GetAnalysisTimeSeries(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAnalysisTimeSeriesParams
+
+	// ------------- Optional query parameter "time_range" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "time_range", r.URL.Query(), &params.TimeRange)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "time_range", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "topic_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "topic_id", r.URL.Query(), &params.TopicId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "topic_id", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "person_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "person_id", r.URL.Query(), &params.PersonId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "person_id", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "group_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "group_id", r.URL.Query(), &params.GroupId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAnalysisTimeSeries(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetBundestagStatus operation middleware
 func (siw *ServerInterfaceWrapper) GetBundestagStatus(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetBundestagStatus(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetCampaigns operation middleware
-func (siw *ServerInterfaceWrapper) GetCampaigns(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetCampaigns(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// PostCampaigns operation middleware
-func (siw *ServerInterfaceWrapper) PostCampaigns(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostCampaigns(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetCampaignsId operation middleware
-func (siw *ServerInterfaceWrapper) GetCampaignsId(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetCampaignsId(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -611,8 +666,29 @@ func (siw *ServerInterfaceWrapper) GetSpeechesId(w http.ResponseWriter, r *http.
 // GetTopics operation middleware
 func (siw *ServerInterfaceWrapper) GetTopics(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetTopicsParams
+
+	// ------------- Optional query parameter "page_size" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "page_size", r.URL.Query(), &params.PageSize)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_size", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "offset", r.URL.Query(), &params.Offset)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetTopics(w, r)
+		siw.Handler.GetTopics(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -768,10 +844,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc("GET "+options.BaseURL+"/alerts", wrapper.GetAlerts)
+	m.HandleFunc("GET "+options.BaseURL+"/analysis/time-series", wrapper.GetAnalysisTimeSeries)
 	m.HandleFunc("GET "+options.BaseURL+"/bundestag/status", wrapper.GetBundestagStatus)
-	m.HandleFunc("GET "+options.BaseURL+"/campaigns", wrapper.GetCampaigns)
-	m.HandleFunc("POST "+options.BaseURL+"/campaigns", wrapper.PostCampaigns)
-	m.HandleFunc("GET "+options.BaseURL+"/campaigns/{id}", wrapper.GetCampaignsId)
 	m.HandleFunc("GET "+options.BaseURL+"/dashboard", wrapper.GetDashboard)
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.GetHealth)
 	m.HandleFunc("GET "+options.BaseURL+"/politicians", wrapper.GetPoliticians)
