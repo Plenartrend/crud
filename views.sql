@@ -392,26 +392,34 @@ activity_data AS (
     JOIN activity_mappings am ON am.activity_id = a.id
     JOIN roles r ON r.id = a.role_id
     WHERE am.topic_id IS NOT NULL
-      AND (_topic_id IS NULL OR am.topic_id = _topic_id)
       AND (_person_id IS NULL OR r.person_id = _person_id)
       AND (_group_id IS NULL OR r.group_id = _group_id)
 ),
+weekly_totals AS (
+    -- Calculate total activity count per week (across all topics)
+    SELECT 
+        ad.week_start,
+        COUNT(*)::float AS total_count
+    FROM activity_data ad
+    GROUP BY ad.week_start
+),
 weekly_stats AS (
-    -- Calculate relevance and sentiment per week
+    -- Calculate topic-specific counts and sentiment per week
     SELECT 
         ad.week_start,
         COUNT(*)::float AS topic_count,
-        SUM(COUNT(*)) OVER (PARTITION BY ad.week_start) AS total_count,
         AVG(ad.sentiment_value)::float AS sentiment_agg
     FROM activity_data ad
+    WHERE (_topic_id IS NULL OR ad.topic_id = _topic_id)
     GROUP BY ad.week_start
 )
 SELECT 
     ws.week_start AS week_date,
-    COALESCE((wst.topic_count / NULLIF(wst.total_count, 0))::float, 0.0) AS topic_relevance,
+    COALESCE((wst.topic_count / NULLIF(wt.total_count, 0))::float, 0.0) AS topic_relevance,
     COALESCE(wst.sentiment_agg, 0.0) AS avg_sentiment
 FROM week_series ws
 LEFT JOIN weekly_stats wst ON ws.week_start = wst.week_start
+LEFT JOIN weekly_totals wt ON ws.week_start = wt.week_start
 ORDER BY ws.week_start ASC;
 
 $$ LANGUAGE SQL STABLE;
