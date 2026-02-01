@@ -281,20 +281,27 @@ func (s *AnalyticsService) getPartyPositions(topicID int) ([]api.PartyPosition, 
 
 	partyPositions := []api.PartyPosition{}
 	for idx, analytics := range analyticsPerParty {
+		// Skip rows with NULL group_id (independent politicians without party affiliation)
+		if !analytics.GroupID.Valid {
+			log.Printf("[Analytics.PartyPositions] Row %d: Skipping NULL group_id (independent politician)", idx)
+			continue
+		}
+
+		groupID := int(analytics.GroupID.Int64)
 		log.Printf("[Analytics.PartyPositions] Row %d: GroupID=%d, TopicRelevance=%.4f, AvgSentiment=%.4f",
-			idx, analytics.GroupID, analytics.TopicRelevance, analytics.AvgSentiment)
+			idx, groupID, analytics.TopicRelevance, analytics.AvgSentiment)
 
 		var partyName string
-		err := s.db.Get(&partyName, "SELECT name FROM parliamentary_groups WHERE id = $1", analytics.GroupID)
+		err := s.db.Get(&partyName, "SELECT name FROM parliamentary_groups WHERE id = $1", groupID)
 		if err != nil {
-			log.Printf("[Analytics.PartyPositions] ERROR: Failed to get party name for group_id %d: %v", analytics.GroupID, err)
+			log.Printf("[Analytics.PartyPositions] ERROR: Failed to get party name for group_id %d: %v", groupID, err)
 			continue
 		}
 
 		sentiment := float32(analytics.AvgSentiment * 100)
 		relevance := float32(analytics.TopicRelevance)
 		log.Printf("[Analytics.PartyPositions] Party '%s' (group_id=%d): Sentiment=%.2f, Relevance=%.4f",
-			partyName, analytics.GroupID, sentiment, relevance)
+			partyName, groupID, sentiment, relevance)
 		partyPositions = append(partyPositions, api.PartyPosition{
 			Party:     &partyName,
 			Sentiment: &sentiment,

@@ -1,6 +1,7 @@
 package types
 
 import (
+	"database/sql"
 	"time"
 )
 
@@ -15,10 +16,11 @@ type TopicWithAnalytics struct {
 }
 
 // PartyAnalytics is the result type from get_topic_analytics_per_party function
+// NOTE: GroupID can be NULL for independent politicians
 type PartyAnalytics struct {
-	GroupID        int     `db:"group_id"`
-	TopicRelevance float64 `db:"topic_relevance"` // Function returns topic_relevance not topic_relevance
-	AvgSentiment   float64 `db:"avg_sentiment"`
+	GroupID        sql.NullInt64 `db:"group_id"`
+	TopicRelevance float64       `db:"topic_relevance"`
+	AvgSentiment   float64       `db:"avg_sentiment"`
 }
 
 // PersonRanking is the result type from get_most_active function
