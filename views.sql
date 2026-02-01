@@ -205,10 +205,10 @@ CREATE OR REPLACE FUNCTION get_topic_analytics_per_party(
     _topic_id INT
 )
     RETURNS TABLE (
-        topic_id INT,
+        group_id INT,
         topic_relevance FLOAT,
         avg_sentiment FLOAT
-                  )
+    )
 AS $$
 WITH counts AS (
     SELECT

@@ -21,16 +21,21 @@ func NewAnalyticsService(db *sqlx.DB) *AnalyticsService {
 }
 
 func (s *AnalyticsService) GetAnalysisTimeSeries(timeRange api.TimeRangeFilter, topicID, personID, groupID *int) ([]api.AnalysisOverTimePoint, error) {
+	log.Printf("[Analytics] GetAnalysisTimeSeries called with timeRange=%s, topicID=%v, personID=%v, groupID=%v",
+		timeRange, topicID, personID, groupID)
+
 	weekDates, err := s.getWeekDatesForTimeRange(string(timeRange))
 	if err != nil {
+		log.Printf("[Analytics] ERROR: Failed to get week dates: %v", err)
 		return nil, err
 	}
+	log.Printf("[Analytics] Generated %d week dates for range '%s'", len(weekDates), timeRange)
 
 	dataPoints := []api.AnalysisOverTimePoint{}
 
-	for _, weekDate := range weekDates {
+	for idx, weekDate := range weekDates {
 		dataQuery := `
-			SELECT COALESCE(AVG(ta.topic_share), 0) as topic_share, 
+			SELECT COALESCE(AVG(ta.topic_relevance), 0) as topic_relevance, 
 			       COALESCE(AVG(ta.avg_sentiment), 0) as avg_sentiment
 			FROM get_topic_analytics($1::date, 20, NULL, NULL) AS ta
 			WHERE 1=1`
@@ -59,13 +64,13 @@ func (s *AnalyticsService) GetAnalysisTimeSeries(timeRange api.TimeRangeFilter, 
 		var topicShare, avgSentiment float64
 		err := s.db.QueryRow(dataQuery, args...).Scan(&topicShare, &avgSentiment)
 		if err != nil {
-			log.Printf("Failed to query data points for week %s: %v", weekDate, err)
+			log.Printf("[Analytics] ERROR: Failed to query data points for week %s (index %d): %v", weekDate, idx, err)
 			continue
 		}
 
 		periodDate, err := time.Parse("2006-01-02", weekDate)
 		if err != nil {
-			log.Printf("Failed to parse week date %s: %v", weekDate, err)
+			log.Printf("[Analytics] ERROR: Failed to parse week date %s: %v", weekDate, err)
 			continue
 		}
 
@@ -80,20 +85,33 @@ func (s *AnalyticsService) GetAnalysisTimeSeries(timeRange api.TimeRangeFilter, 
 		})
 	}
 
-	log.Printf("Generated %d data points BEFORE reversal", len(dataPoints))
+	log.Printf("[Analytics] Generated %d data points BEFORE reversal", len(dataPoints))
 	if len(dataPoints) > 0 {
-		log.Printf("First point (before reverse): %s", dataPoints[0].Period.Time.Format("2006-01-02"))
-		log.Printf("Last point (before reverse): %s", dataPoints[len(dataPoints)-1].Period.Time.Format("2006-01-02"))
+		log.Printf("[Analytics] First point (before reverse): date=%s, relevance=%.4f, sentiment=%.4f",
+			dataPoints[0].Period.Time.Format("2006-01-02"),
+			*dataPoints[0].Relevance,
+			*dataPoints[0].Sentiment)
+		log.Printf("[Analytics] Last point (before reverse): date=%s, relevance=%.4f, sentiment=%.4f",
+			dataPoints[len(dataPoints)-1].Period.Time.Format("2006-01-02"),
+			*dataPoints[len(dataPoints)-1].Relevance,
+			*dataPoints[len(dataPoints)-1].Sentiment)
 	}
 
+	// Reverse the dataPoints so oldest is first (left), newest is last (right)
 	for i, j := 0, len(dataPoints)-1; i < j; i, j = i+1, j-1 {
 		dataPoints[i], dataPoints[j] = dataPoints[j], dataPoints[i]
 	}
 
-	log.Printf("Generated %d data points AFTER reversal", len(dataPoints))
+	log.Printf("[Analytics] Generated %d data points AFTER reversal", len(dataPoints))
 	if len(dataPoints) > 0 {
-		log.Printf("First point (after reverse): %s", dataPoints[0].Period.Time.Format("2006-01-02"))
-		log.Printf("Last point (after reverse): %s", dataPoints[len(dataPoints)-1].Period.Time.Format("2006-01-02"))
+		log.Printf("[Analytics] First point (after reverse): date=%s, relevance=%.4f, sentiment=%.4f",
+			dataPoints[0].Period.Time.Format("2006-01-02"),
+			*dataPoints[0].Relevance,
+			*dataPoints[0].Sentiment)
+		log.Printf("[Analytics] Last point (after reverse): date=%s, relevance=%.4f, sentiment=%.4f",
+			dataPoints[len(dataPoints)-1].Period.Time.Format("2006-01-02"),
+			*dataPoints[len(dataPoints)-1].Relevance,
+			*dataPoints[len(dataPoints)-1].Sentiment)
 	}
 
 	return dataPoints, nil
@@ -186,7 +204,7 @@ func (s *AnalyticsService) getFirstAndLastAnalyzedDate() (time.Time, time.Time, 
 
 func (s *AnalyticsService) GetTopicDetail(topicID int) (*api.TopicDetail, error) {
 	dataQuery := `
-		SELECT t.id, t.name, t.updated, t.created, ta.topic_share, ta.avg_sentiment
+		SELECT t.id, t.name, t.updated, t.created, ta.topic_relevance, ta.avg_sentiment
 		FROM topics t
 		JOIN get_topic_analytics(CURRENT_DATE, 20, NULL, NULL) AS ta ON ta.topic_id = t.id
 		WHERE t.id = $1
@@ -262,24 +280,29 @@ func (s *AnalyticsService) getPartyPositions(topicID int) ([]api.PartyPosition, 
 	log.Printf("Found %d party analytics rows", len(analyticsPerParty))
 
 	partyPositions := []api.PartyPosition{}
-	for _, analytics := range analyticsPerParty {
+	for idx, analytics := range analyticsPerParty {
+		log.Printf("[Analytics.PartyPositions] Row %d: GroupID=%d, TopicRelevance=%.4f, AvgSentiment=%.4f",
+			idx, analytics.GroupID, analytics.TopicRelevance, analytics.AvgSentiment)
+
 		var partyName string
 		err := s.db.Get(&partyName, "SELECT name FROM parliamentary_groups WHERE id = $1", analytics.GroupID)
 		if err != nil {
-			log.Printf("Failed to get party name for group_id %d: %v", analytics.GroupID, err)
+			log.Printf("[Analytics.PartyPositions] ERROR: Failed to get party name for group_id %d: %v", analytics.GroupID, err)
 			continue
 		}
 
 		sentiment := float32(analytics.AvgSentiment * 100)
 		relevance := float32(analytics.TopicRelevance)
-		log.Printf("Party: %s (group_id: %d), Sentiment: %.2f, Relevance: %.4f", partyName, analytics.GroupID, sentiment, relevance)
+		log.Printf("[Analytics.PartyPositions] Party '%s' (group_id=%d): Sentiment=%.2f, Relevance=%.4f",
+			partyName, analytics.GroupID, sentiment, relevance)
 		partyPositions = append(partyPositions, api.PartyPosition{
 			Party:     &partyName,
 			Sentiment: &sentiment,
 			Relevance: &relevance,
 		})
 	}
-	log.Printf("Built %d party positions", len(partyPositions))
+
+	log.Printf("[Analytics.PartyPositions] Built %d party positions", len(partyPositions))
 	return partyPositions, nil
 }
 

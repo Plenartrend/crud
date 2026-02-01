@@ -332,10 +332,10 @@ func (s *Server) GetTopics(w http.ResponseWriter, r *http.Request, params api.Ge
 	}
 
 	dataQuery := `
-		SELECT t.id, t.name, t.updated, t.created, ta.topic_share, ta.avg_sentiment
+		SELECT t.id, t.name, t.updated, t.created, ta.topic_relevance, ta.avg_sentiment
 		FROM get_topic_analytics(CURRENT_DATE, 20, NULL, NULL) AS ta
 		JOIN topics t ON t.id = ta.topic_id
-		ORDER BY ta.topic_share DESC
+		ORDER BY ta.topic_relevance DESC
 		LIMIT $1 OFFSET $2
 	`
 	var rows []types.TopicWithAnalytics

@@ -1,4 +1,4 @@
-package main
+package types
 
 import (
 	"database/sql"
@@ -32,13 +32,6 @@ type Topic struct {
 	Name    string    `db:"name" json:"name,omitempty"`
 	Updated time.Time `db:"updated" json:"updated,omitempty"`
 	Created time.Time `db:"created" json:"created,omitempty"`
-}
-
-// TopicWithAnalytics is the result of joining topics with get_topic_analytics (relevance + sentiment).
-type TopicWithAnalytics struct {
-	Topic
-	TopicRelevance float64 `db:"topic_share"` // DB column from get_topic_analytics is topic_share
-	AvgSentiment   float64 `db:"avg_sentiment"`
 }
 
 type Process struct {
@@ -197,18 +190,3 @@ const (
 	ProcessingStatusCompleted  ProcessingStatus = "completed"
 	ProcessingStatusFailed     ProcessingStatus = "failed"
 )
-
-// PersonRanking represents the result of SQL functions that return person rankings with scores.
-type PersonRanking struct {
-	PersonID     int     `db:"person_id" json:"person_id"`
-	Score        float64 `db:"score" json:"score"`
-	RankingType  string  `db:"ranking_type" json:"ranking_type"`
-}
-
-// PartyAnalytics is the result type from get_topic_analytics_per_party function
-// The function returns: group_id, topic_relevance, avg_sentiment (no name, no topic_id)
-type PartyAnalytics struct {
-	GroupID        int     `db:"group_id"`
-	TopicRelevance float64 `db:"topic_relevance"`
-	AvgSentiment   float64 `db:"avg_sentiment"`
-}
