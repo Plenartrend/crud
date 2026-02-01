@@ -339,3 +339,79 @@ SELECT
     AVG(pa.activities_per_protocol) AS average_activities_per_protocol
 FROM politician_activity_per_period pa
 GROUP BY election_period;
+
+
+------------------ Time Series Analytics (Optimized) ------------------
+
+-- Generates time series analytics for all weeks in a date range in a single query
+-- This replaces the need to call get_topic_analytics() in a loop for each week
+-- Performance improvement: O(n) queries -> O(1) query
+CREATE OR REPLACE FUNCTION get_time_series_analytics(
+    _start_date DATE,
+    _end_date DATE,
+    _lookback_limit INT DEFAULT 20,
+    _topic_id INT DEFAULT NULL,
+    _person_id INT DEFAULT NULL,
+    _group_id INT DEFAULT NULL
+)
+RETURNS TABLE (
+    week_date DATE,
+    topic_relevance FLOAT,
+    avg_sentiment FLOAT
+) 
+AS $$
+WITH week_series AS (
+    -- Generate all Monday dates (start of ISO weeks) in the range
+    SELECT date_trunc('week', d)::date AS week_start
+    FROM generate_series(_start_date, _end_date, '1 week'::interval) AS d
+),
+protocols_per_week AS (
+    -- For each week, find the protocols to include (last _lookback_limit protocols up to that week)
+    SELECT 
+        ws.week_start,
+        p.id AS protocol_id
+    FROM week_series ws
+    CROSS JOIN LATERAL (
+        SELECT id, date
+        FROM analysed_protocols
+        WHERE date_trunc('week', date) <= ws.week_start
+        ORDER BY date DESC
+        LIMIT _lookback_limit
+    ) p
+),
+activity_data AS (
+    -- Get all relevant activity mappings for the protocols in our window
+    SELECT 
+        pw.week_start,
+        am.topic_id,
+        am.sentiment_value,
+        r.person_id,
+        r.group_id
+    FROM protocols_per_week pw
+    JOIN activities a ON a.protocol_id = pw.protocol_id
+    JOIN activity_mappings am ON am.activity_id = a.id
+    JOIN roles r ON r.id = a.role_id
+    WHERE am.topic_id IS NOT NULL
+      AND (_topic_id IS NULL OR am.topic_id = _topic_id)
+      AND (_person_id IS NULL OR r.person_id = _person_id)
+      AND (_group_id IS NULL OR r.group_id = _group_id)
+),
+weekly_stats AS (
+    -- Calculate relevance and sentiment per week
+    SELECT 
+        ad.week_start,
+        COUNT(*)::float AS topic_count,
+        SUM(COUNT(*)) OVER (PARTITION BY ad.week_start) AS total_count,
+        AVG(ad.sentiment_value)::float AS sentiment_agg
+    FROM activity_data ad
+    GROUP BY ad.week_start
+)
+SELECT 
+    ws.week_start AS week_date,
+    COALESCE((wst.topic_count / NULLIF(wst.total_count, 0))::float, 0.0) AS topic_relevance,
+    COALESCE(wst.sentiment_agg, 0.0) AS avg_sentiment
+FROM week_series ws
+LEFT JOIN weekly_stats wst ON ws.week_start = wst.week_start
+ORDER BY ws.week_start ASC;
+
+$$ LANGUAGE SQL STABLE;

@@ -24,59 +24,38 @@ func (s *AnalyticsService) GetAnalysisTimeSeries(timeRange api.TimeRangeFilter, 
 	log.Printf("[Analytics] GetAnalysisTimeSeries called with timeRange=%s, topicID=%v, personID=%v, groupID=%v",
 		timeRange, topicID, personID, groupID)
 
-	weekDates, err := s.getWeekDatesForTimeRange(string(timeRange))
+	// Calculate start and end dates for the time range
+	startDate, endDate, err := s.getDateRangeForTimeRange(string(timeRange))
 	if err != nil {
-		log.Printf("[Analytics] ERROR: Failed to get week dates: %v", err)
+		log.Printf("[Analytics] ERROR: Failed to get date range: %v", err)
 		return nil, err
 	}
-	log.Printf("[Analytics] Generated %d week dates for range '%s'", len(weekDates), timeRange)
+	log.Printf("[Analytics] Date range: %s to %s", startDate.Format("2006-01-02"), endDate.Format("2006-01-02"))
 
-	dataPoints := []api.AnalysisOverTimePoint{}
+	// Call optimized SQL function that processes all weeks in one query
+	type TimeSeriesRow struct {
+		WeekDate       time.Time `db:"week_date"`
+		TopicRelevance float64   `db:"topic_relevance"`
+		AvgSentiment   float64   `db:"avg_sentiment"`
+	}
 
-	for idx, weekDate := range weekDates {
-		dataQuery := `
-			SELECT COALESCE(AVG(ta.topic_relevance), 0) as topic_relevance, 
-			       COALESCE(AVG(ta.avg_sentiment), 0) as avg_sentiment
-			FROM get_topic_analytics($1::date, 20, NULL, NULL) AS ta
-			WHERE 1=1`
+	var rows []TimeSeriesRow
+	err = s.db.Select(&rows, 
+		`SELECT * FROM get_time_series_analytics($1, $2, 20, $3, $4, $5)`,
+		startDate, endDate, topicID, personID, groupID)
+	if err != nil {
+		log.Printf("[Analytics] ERROR: Failed to query time series: %v", err)
+		return nil, err
+	}
 
-		args := []interface{}{weekDate}
-		argPos := 2
+	log.Printf("[Analytics] Retrieved %d data points from SQL", len(rows))
 
-		if topicID != nil {
-			dataQuery += " AND ta.topic_id = $" + strconv.Itoa(argPos)
-			args = append(args, *topicID)
-			argPos++
-		}
-
-		if personID != nil {
-			dataQuery += " AND ta.person_id = $" + strconv.Itoa(argPos)
-			args = append(args, *personID)
-			argPos++
-		}
-
-		if groupID != nil {
-			dataQuery += " AND ta.group_id = $" + strconv.Itoa(argPos)
-			args = append(args, *groupID)
-			argPos++
-		}
-
-		var topicShare, avgSentiment float64
-		err := s.db.QueryRow(dataQuery, args...).Scan(&topicShare, &avgSentiment)
-		if err != nil {
-			log.Printf("[Analytics] ERROR: Failed to query data points for week %s (index %d): %v", weekDate, idx, err)
-			continue
-		}
-
-		periodDate, err := time.Parse("2006-01-02", weekDate)
-		if err != nil {
-			log.Printf("[Analytics] ERROR: Failed to parse week date %s: %v", weekDate, err)
-			continue
-		}
-
-		period := openapi_types.Date{Time: periodDate}
-		relevance := float32(topicShare)
-		sentiment := float32(avgSentiment)
+	// Convert SQL results to API response format
+	dataPoints := make([]api.AnalysisOverTimePoint, 0, len(rows))
+	for _, row := range rows {
+		period := openapi_types.Date{Time: row.WeekDate}
+		relevance := float32(row.TopicRelevance)
+		sentiment := float32(row.AvgSentiment)
 
 		dataPoints = append(dataPoints, api.AnalysisOverTimePoint{
 			Period:    &period,
@@ -85,30 +64,12 @@ func (s *AnalyticsService) GetAnalysisTimeSeries(timeRange api.TimeRangeFilter, 
 		})
 	}
 
-	log.Printf("[Analytics] Generated %d data points BEFORE reversal", len(dataPoints))
 	if len(dataPoints) > 0 {
-		log.Printf("[Analytics] First point (before reverse): date=%s, relevance=%.4f, sentiment=%.4f",
+		log.Printf("[Analytics] First point: date=%s, relevance=%.4f, sentiment=%.4f",
 			dataPoints[0].Period.Time.Format("2006-01-02"),
 			*dataPoints[0].Relevance,
 			*dataPoints[0].Sentiment)
-		log.Printf("[Analytics] Last point (before reverse): date=%s, relevance=%.4f, sentiment=%.4f",
-			dataPoints[len(dataPoints)-1].Period.Time.Format("2006-01-02"),
-			*dataPoints[len(dataPoints)-1].Relevance,
-			*dataPoints[len(dataPoints)-1].Sentiment)
-	}
-
-	// Reverse the dataPoints so oldest is first (left), newest is last (right)
-	for i, j := 0, len(dataPoints)-1; i < j; i, j = i+1, j-1 {
-		dataPoints[i], dataPoints[j] = dataPoints[j], dataPoints[i]
-	}
-
-	log.Printf("[Analytics] Generated %d data points AFTER reversal", len(dataPoints))
-	if len(dataPoints) > 0 {
-		log.Printf("[Analytics] First point (after reverse): date=%s, relevance=%.4f, sentiment=%.4f",
-			dataPoints[0].Period.Time.Format("2006-01-02"),
-			*dataPoints[0].Relevance,
-			*dataPoints[0].Sentiment)
-		log.Printf("[Analytics] Last point (after reverse): date=%s, relevance=%.4f, sentiment=%.4f",
+		log.Printf("[Analytics] Last point: date=%s, relevance=%.4f, sentiment=%.4f",
 			dataPoints[len(dataPoints)-1].Period.Time.Format("2006-01-02"),
 			*dataPoints[len(dataPoints)-1].Relevance,
 			*dataPoints[len(dataPoints)-1].Sentiment)
@@ -189,17 +150,51 @@ func (s *AnalyticsService) getWeekDatesForTimeRange(timeRange string) ([]string,
 
 func (s *AnalyticsService) getFirstAndLastAnalyzedDate() (time.Time, time.Time, error) {
 	firstProtocolDate, lastProtocolDate := time.Time{}, time.Time{}
-	err := s.db.Get(&firstProtocolDate, "SELECT MIN(date) FROM analyzed_protocols")
+	err := s.db.Get(&firstProtocolDate, "SELECT MIN(date) FROM analysed_protocols")
 	if err != nil {
 		log.Printf("Failed to get first protocol date: %v", err)
 		return time.Time{}, time.Time{}, err
 	}
-	err = s.db.Get(&lastProtocolDate, "SELECT MAX(date) FROM analyzed_protocols")
+	err = s.db.Get(&lastProtocolDate, "SELECT MAX(date) FROM analysed_protocols")
 	if err != nil {
 		log.Printf("Failed to get last protocol date: %v", err)
 		return time.Time{}, time.Time{}, err
 	}
 	return firstProtocolDate, lastProtocolDate, nil
+}
+
+// getDateRangeForTimeRange calculates start and end dates for time series queries
+func (s *AnalyticsService) getDateRangeForTimeRange(timeRange string) (time.Time, time.Time, error) {
+	now := time.Now()
+	endDate := now
+	var startDate time.Time
+
+	switch timeRange {
+	case "last_month":
+		startDate = now.AddDate(0, -1, 0)
+	case "last_6_months":
+		startDate = now.AddDate(0, -6, 0)
+	case "ytd":
+		startDate = time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+	case "last_year":
+		startDate = now.AddDate(-1, 0, 0)
+	case "last_2_years":
+		startDate = now.AddDate(-2, 0, 0)
+	case "last_5_years":
+		startDate = now.AddDate(-5, 0, 0)
+	case "max":
+		firstProtocolDate, lastProtocolDate, err := s.getFirstAndLastAnalyzedDate()
+		if err != nil {
+			log.Printf("Failed to get first and last analyzed date: %v", err)
+			return time.Time{}, time.Time{}, err
+		}
+		return firstProtocolDate, lastProtocolDate, nil
+	default:
+		log.Printf("Invalid time_range parameter: %s", timeRange)
+		return time.Time{}, time.Time{}, sql.ErrNoRows
+	}
+
+	return startDate, endDate, nil
 }
 
 func (s *AnalyticsService) GetTopicDetail(topicID int) (*api.TopicDetail, error) {
