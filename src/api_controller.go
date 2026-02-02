@@ -194,7 +194,11 @@ func (s *Server) getPoliticians(electionPeriod *int, groupID *int, pageSize *int
 
 		// Convert to API types (pointers)
 		idStr := strconv.Itoa(role.PersonID)
-		name := role.FirstName + " " + role.LastName
+		nameSuffix := ""
+		if role.NameSuffix.Valid && role.NameSuffix.String != "" {
+			nameSuffix = role.NameSuffix.String + " "
+		}
+		name := role.FirstName + " " + nameSuffix + role.LastName
 		party := ""
 		if roleWithFaction.FactionName.Valid {
 			party = roleWithFaction.FactionName.String
