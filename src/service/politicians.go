@@ -27,15 +27,9 @@ func NewPoliticiansService(db *sqlx.DB, topicsService *TopicsService, helpersSer
 	}
 }
 
-func (s *PoliticiansService) GetPoliticians(electionPeriod *int, groupID *int, pageSize *int, offset int) ([]api.Politician, int, error) {
+func (s *PoliticiansService) GetPoliticians(electionPeriod int, groupID *int, pageSize *int, offset int) ([]api.Politician, int, error) {
 	politicians := []api.Politician{}
 	log.Printf("Getting politicians for election period: %d, groupID: %v, pageSize: %d, offset: %d", electionPeriod, groupID, pageSize, offset)
-
-	// Default to latest election period if not specified
-	period := 21 //TODO: Fetch
-	if electionPeriod != nil {
-		period = *electionPeriod
-	}
 
 	// Query with pagination
 	query := (`
@@ -71,13 +65,13 @@ func (s *PoliticiansService) GetPoliticians(electionPeriod *int, groupID *int, p
 	`)
 
 	var totalCount int
-	err := s.db.Get(&totalCount, s.db.Rebind(countQuery), period, groupID)
+	err := s.db.Get(&totalCount, s.db.Rebind(countQuery), electionPeriod, groupID)
 	if err != nil {
 		log.Printf("Failed to count politicians: %v", err)
 		return nil, 0, err
 	}
 
-	log.Printf("Fetching politicians for election period: %d, groupID: %v, limit: %d, offset: %d", period, groupID, pageSize, offset)
+	log.Printf("Fetching politicians for election period: %d, groupID: %v, limit: %d, offset: %d", electionPeriod, groupID, pageSize, offset)
 
 	type RoleWithFaction struct {
 		types.Role
@@ -85,7 +79,7 @@ func (s *PoliticiansService) GetPoliticians(electionPeriod *int, groupID *int, p
 	}
 
 	rolesWithFaction := []RoleWithFaction{}
-	err = s.db.Select(&rolesWithFaction, s.db.Rebind(query), period, pageSize, offset, groupID)
+	err = s.db.Select(&rolesWithFaction, s.db.Rebind(query), electionPeriod, pageSize, offset, groupID)
 	if err != nil {
 		log.Printf("Failed to query roles: %v", err)
 		return nil, 0, err
@@ -96,25 +90,25 @@ func (s *PoliticiansService) GetPoliticians(electionPeriod *int, groupID *int, p
 		personIDs[i] = roleWithFaction.Role.PersonID
 	}
 
-	cfactors, err := s.GetContributionFactor(period, personIDs)
+	cfactors, err := s.GetContributionFactor(electionPeriod, personIDs)
 	if err != nil {
 		log.Printf("Failed to get contribution factors: %v", err)
 		cfactors = make(map[int]ContributionFactor)
 	}
 
-	volatilities, err := s.GetVolatility(period, personIDs)
+	volatilities, err := s.GetVolatility(electionPeriod, personIDs)
 	if err != nil {
 		log.Printf("Failed to get volatilities: %v", err)
 		volatilities = make(map[int]float64)
 	}
 
-	topTopicsMap, err := s.GetTopTopics(period, personIDs, 3)
+	topTopicsMap, err := s.GetTopTopics(electionPeriod, personIDs, 3)
 	if err != nil {
 		log.Printf("Failed to get top topics: %v", err)
 		topTopicsMap = make(map[int][]types.Topic)
 	}
 
-	speechCounts, err := s.GetNumberOfSpeeches(period, personIDs, nil)
+	speechCounts, err := s.GetNumberOfSpeeches(electionPeriod, personIDs, nil)
 	if err != nil {
 		log.Printf("Failed to get speech counts: %v", err)
 		speechCounts = make(map[int]int)

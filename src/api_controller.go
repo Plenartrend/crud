@@ -20,17 +20,20 @@ type Server struct {
 	politiciansService *service.PoliticiansService
 	topicsService      *service.TopicsService
 	helpersService     *service.HelpersService
+	partiesService     *service.PartyService
 }
 
 func NewServer(db *sqlx.DB) *Server {
 	helpersService := service.NewHelpersService(db)
 	topicsService := service.NewTopicsService(db, helpersService)
+	partiesService := service.NewPartyService(db, topicsService)
 	politiciansService := service.NewPoliticiansService(db, topicsService, helpersService)
 	return &Server{
 		db:                 db,
 		politiciansService: politiciansService,
 		topicsService:      topicsService,
 		helpersService:     helpersService,
+		partiesService:     partiesService,
 	}
 }
 
@@ -58,12 +61,7 @@ func (s *Server) GetBundestagStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) GetAnalysisTimeSeries(w http.ResponseWriter, r *http.Request, params api.GetAnalysisTimeSeriesParams) {
 	log.Printf("GetAnalysisTimeSeries called")
 
-	if params.TimeRange == nil {
-		http.Error(w, "time_range parameter is required", http.StatusBadRequest)
-		return
-	}
-
-	dataPoints, err := s.topicsService.GetAnalysisTimeSeries(*params.TimeRange, params.TopicId, params.PersonId, params.GroupId)
+	dataPoints, err := s.topicsService.GetAnalysisTimeSeries(params.TimeRange, params.TopicId, params.PersonId, params.GroupId)
 	if err != nil {
 		log.Printf("Failed to get analysis time series: %v", err)
 		http.Error(w, "Failed to get analysis time series", http.StatusInternalServerError)
@@ -95,11 +93,6 @@ func (s *Server) GetPoliticians(w http.ResponseWriter, r *http.Request, params a
 		offset = *params.Offset
 	}
 
-	var electionPeriod *int
-	if params.ElectionPeriod != nil {
-		electionPeriod = params.ElectionPeriod
-	}
-
 	var groupID *int
 	if params.GroupId != nil {
 		groupID = params.GroupId
@@ -108,7 +101,7 @@ func (s *Server) GetPoliticians(w http.ResponseWriter, r *http.Request, params a
 		log.Printf("No group ID filter received")
 	}
 
-	politicians, totalCount, err := s.politiciansService.GetPoliticians(electionPeriod, groupID, params.PageSize, offset)
+	politicians, totalCount, err := s.politiciansService.GetPoliticians(params.ElectionPeriod, groupID, params.PageSize, offset)
 	if err != nil {
 		log.Printf("Failed to query politicians: %v", err)
 		http.Error(w, "Failed to query politicians", http.StatusInternalServerError)
@@ -147,22 +140,7 @@ func (s *Server) GetPoliticiansId(w http.ResponseWriter, r *http.Request, id str
 		return
 	}
 
-	var electionPeriod int
-	if params.ElectionPeriod == nil {
-		log.Printf("No election period provided, fetching max for person %d", personID)
-		electionPeriod, err = s.helpersService.GetMaxElectionPeriod(personID)
-		if err != nil {
-			log.Printf("Failed to get max election period: %v", err)
-			http.Error(w, "Failed to get max election period", http.StatusInternalServerError)
-			return
-		}
-		log.Printf("Using max election period: %d", electionPeriod)
-	} else {
-		electionPeriod = int(*params.ElectionPeriod)
-		log.Printf("Using provided election period: %d", electionPeriod)
-	}
-
-	politicianDetail, err := s.politiciansService.GetPoliticianDetail(personID, electionPeriod)
+	politicianDetail, err := s.politiciansService.GetPoliticianDetail(personID, params.ElectionPeriod)
 	if err != nil {
 		log.Printf("Failed to get politician details: %v", err)
 		http.Error(w, "Politician not found", http.StatusNotFound)
@@ -184,22 +162,7 @@ func (s *Server) GetPoliticiansIdSimilar(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	var electionPeriod int
-	if params.ElectionPeriod == nil {
-		log.Printf("No election period provided, fetching max for person %d", personID)
-		electionPeriod, err = s.helpersService.GetMaxElectionPeriod(personID)
-		if err != nil {
-			log.Printf("Failed to get max election period: %v", err)
-			http.Error(w, "Failed to get max election period", http.StatusInternalServerError)
-			return
-		}
-		log.Printf("Using max election period: %d", electionPeriod)
-	} else {
-		electionPeriod = int(*params.ElectionPeriod)
-		log.Printf("Using provided election period: %d", electionPeriod)
-	}
-
-	similar, err := s.politiciansService.GetSimilarPoliticians(personID, electionPeriod)
+	similar, err := s.politiciansService.GetSimilarPoliticians(personID, params.ElectionPeriod)
 	if err != nil {
 		log.Printf("Failed to get similar politicians: %v", err)
 		http.Error(w, "Failed to get similar politicians", http.StatusInternalServerError)
@@ -221,26 +184,7 @@ func (s *Server) GetPoliticiansIdActivity(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var electionPeriod int
-	if params.ElectionPeriod == nil {
-		log.Printf("No election period provided, fetching max for person %d", personID)
-		electionPeriod, err = s.helpersService.GetMaxElectionPeriod(personID)
-		if err != nil {
-			log.Printf("Failed to get max election period: %v", err)
-			http.Error(w, "Failed to get max election period", http.StatusInternalServerError)
-			return
-		}
-		log.Printf("Using max election period: %d", electionPeriod)
-	} else {
-		electionPeriod = int(*params.ElectionPeriod)
-		log.Printf("Using provided election period: %d", electionPeriod)
-	}
-
-	timeRange := api.TimeRangeFilter("last_year")
-	if params.TimeRange != nil {
-		timeRange = *params.TimeRange
-	}
-	activityData, err := s.politiciansService.GetActivityTimeSeries(timeRange, &personID, nil)
+	activityData, err := s.politiciansService.GetActivityTimeSeries(params.TimeRange, &personID, nil)
 	if err != nil {
 		log.Printf("Failed to get activity time series: %v", err)
 		http.Error(w, "Failed to get activity time series", http.StatusInternalServerError)
@@ -300,7 +244,7 @@ func (s *Server) GetReports(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) GetSearch(w http.ResponseWriter, r *http.Request, params api.GetSearchParams) {
 	// Use nil page size to get all politicians for search
-	politicians, _, err := s.politiciansService.GetPoliticians(nil, nil, nil, 0)
+	politicians, _, err := s.politiciansService.GetPoliticians(21, nil, nil, 0) // TODO: election period
 	if err != nil {
 		log.Printf("Failed to query politicians: %v", err)
 		http.Error(w, "Failed to query politicians", http.StatusInternalServerError)
@@ -487,6 +431,424 @@ func (s *Server) GetTopicsId(w http.ResponseWriter, r *http.Request, id string) 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(topicDetail)
 }
+
+func (s *Server) GetParties(w http.ResponseWriter, r *http.Request, params api.GetPartiesParams) {
+	parties, err := s.partiesService.GetParties(params.ElectionPeriod)
+
+	if err != nil {
+		log.Printf("Failed to query parties: %v", err)
+		http.Error(w, "Failed to query parties", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(parties)
+}
+
+func (s *Server) GetPartiesId(w http.ResponseWriter, r *http.Request, id string, params api.GetPartiesIdParams) {
+	partyID, err := strconv.Atoi(id)
+	if err != nil {
+		log.Printf("Invalid party ID: %v", err)
+		http.Error(w, "Invalid party ID", http.StatusBadRequest)
+		return
+	}
+
+	partyDetail, err := s.partiesService.GetPartiesId(partyID, params.ElectionPeriod, params.TimeRange)
+	if err != nil {
+		log.Printf("Failed to get party detail: %v", err)
+		http.Error(w, "Failed to query party", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(partyDetail)
+}
+
+/*
+func (s *Server) GetParties_gen(w http.ResponseWriter, r *http.Request) {
+	log.Printf("GetParties called")
+
+	period := 21 // Default to current period
+
+	// Query all parliamentary groups
+	query := `
+		SELECT DISTINCT pg.id, pg.name
+		FROM parliamentary_groups pg
+		JOIN roles r ON r.group_id = pg.id
+		WHERE r.election_period = ?
+		ORDER BY pg.name
+	`
+
+	type GroupResult struct {
+		ID   int    `db:"id"`
+		Name string `db:"name"`
+	}
+
+	groups := []GroupResult{}
+	err := s.db.Select(&groups, s.db.Rebind(query), period)
+	if err != nil {
+		log.Printf("Failed to query parliamentary groups: %v", err)
+		http.Error(w, "Failed to query parliamentary groups", http.StatusInternalServerError)
+		return
+	}
+
+	// Get all person IDs for each group
+	groupPersonIDs := make(map[int][]int)
+	for _, g := range groups {
+		var personIDs []int
+		err := s.db.Select(&personIDs, s.db.Rebind(`
+			SELECT DISTINCT person_id
+			FROM roles
+			WHERE group_id = ? AND election_period = ?
+		`), g.ID, period)
+		if err != nil {
+			log.Printf("Failed to get person IDs for group %d: %v", g.ID, err)
+			continue
+		}
+		groupPersonIDs[g.ID] = personIDs
+	}
+
+	// Convert to API types with analytics
+	apiParties := []api.Party{}
+	for _, g := range groups {
+		personIDs := groupPersonIDs[g.ID]
+		if len(personIDs) == 0 {
+			continue
+		}
+
+		// Get analytics for all members
+		cfactors, _ := s.analyticsService.GetContributionFactor(period, personIDs)
+		volatilities, _ := s.analyticsService.GetVolatility(period, personIDs)
+		topTopicsMap, _ := s.analyticsService.GetTopTopics(period, personIDs, 3)
+		speechCounts, _ := s.analyticsService.GetNumberOfSpeeches(period, personIDs)
+
+		// Aggregate analytics
+		totalSpeeches := 0
+		for _, count := range speechCounts {
+			totalSpeeches += count
+		}
+
+		// Calculate average volatility
+		avgVolatility := 0.0
+		if len(volatilities) > 0 {
+			for _, v := range volatilities {
+				avgVolatility += v
+			}
+			avgVolatility /= float64(len(volatilities))
+		}
+
+		// Determine predominant contribution factor
+		cfactorCounts := map[service.ContributionFactor]int{}
+		for _, cf := range cfactors {
+			cfactorCounts[cf]++
+		}
+		var predominantCF service.ContributionFactor = "low"
+		maxCount := 0
+		for cf, count := range cfactorCounts {
+			if count > maxCount {
+				maxCount = count
+				predominantCF = cf
+			}
+		}
+
+		// Aggregate top topics across all members
+		topicFrequency := make(map[int]int)
+		for _, topics := range topTopicsMap {
+			for _, topic := range topics {
+				topicFrequency[topic.ID]++
+			}
+		}
+
+		// Get top 3 topics by frequency
+		type topicCount struct {
+			topic types.Topic
+			count int
+		}
+		var topicCounts []topicCount
+		for topicID, count := range topicFrequency {
+			for _, topics := range topTopicsMap {
+				for _, topic := range topics {
+					if topic.ID == topicID {
+						topicCounts = append(topicCounts, topicCount{topic, count})
+						break
+					}
+				}
+			}
+		}
+
+		// Sort by count and take top 3
+		apiTopTopics := []api.TopTopic{}
+		for i := 0; i < len(topicCounts) && i < 3; i++ {
+			maxIdx := i
+			for j := i + 1; j < len(topicCounts); j++ {
+				if topicCounts[j].count > topicCounts[maxIdx].count {
+					maxIdx = j
+				}
+			}
+			if maxIdx != i {
+				topicCounts[i], topicCounts[maxIdx] = topicCounts[maxIdx], topicCounts[i]
+			}
+			topicName := topicCounts[i].topic.Name
+			stance := "neutral"
+			apiTopTopics = append(apiTopTopics, api.TopTopic{
+				Topic:  &topicName,
+				Stance: &stance,
+			})
+		}
+
+		id := strconv.Itoa(g.ID)
+		name := g.Name
+		volatilityStr := fmt.Sprintf("%.2f", avgVolatility)
+
+		var apiCF api.PartyContributionFactor
+		switch strings.ToLower(string(predominantCF)) {
+		case "high":
+			apiCF = api.PartyContributionFactorHigh
+		case "medium":
+			apiCF = api.PartyContributionFactorMedium
+		default:
+			apiCF = api.PartyContributionFactorLow
+		}
+
+		apiParties = append(apiParties, api.Party{
+			Id:                 &id,
+			Name:               &name,
+			NumSpeeches:        &totalSpeeches,
+			Volatility:         &volatilityStr,
+			ContributionFactor: &apiCF,
+			TopTopics:          &apiTopTopics,
+		})
+	}
+
+	log.Printf("Returning %d parties", len(apiParties))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(apiParties)
+}
+
+func (s *Server) GetPartiesId_gen(w http.ResponseWriter, r *http.Request, id string) {
+	log.Printf("GetPartiesId called with id: %s", id)
+
+	groupID, err := strconv.Atoi(id)
+	if err != nil {
+		log.Printf("Invalid party ID: %v", err)
+		http.Error(w, "Invalid party ID", http.StatusBadRequest)
+		return
+	}
+
+	period := 21 // Default to current period
+
+	// Query the parliamentary group
+	type GroupResult struct {
+		ID   int    `db:"id"`
+		Name string `db:"name"`
+	}
+
+	var group GroupResult
+	err = s.db.Get(&group, s.db.Rebind(`
+		SELECT pg.id, pg.name
+		FROM parliamentary_groups pg
+		WHERE pg.id = ?
+	`), groupID)
+	if err != nil {
+		log.Printf("Failed to query party: %v", err)
+		http.Error(w, "Party not found", http.StatusNotFound)
+		return
+	}
+
+	// Get all person IDs for this group
+	var personIDs []int
+	err = s.db.Select(&personIDs, s.db.Rebind(`
+		SELECT DISTINCT person_id
+		FROM roles
+		WHERE group_id = ? AND election_period = ?
+	`), groupID, period)
+	if err != nil {
+		log.Printf("Failed to get person IDs: %v", err)
+		http.Error(w, "Failed to get party members", http.StatusInternalServerError)
+		return
+	}
+
+	// Get members (politicians)
+	members, _, err := s.getPoliticians(&period, &groupID, nil, 0)
+	if err != nil {
+		log.Printf("Failed to get members: %v", err)
+		members = []api.Politician{}
+	}
+
+	// Get analytics for all members
+	cfactors, _ := s.analyticsService.GetContributionFactor(period, personIDs)
+	volatilities, _ := s.analyticsService.GetVolatility(period, personIDs)
+	topTopicsMap, _ := s.analyticsService.GetTopTopics(period, personIDs, 3)
+	speechCounts, _ := s.analyticsService.GetNumberOfSpeeches(period, personIDs)
+
+	// Aggregate analytics
+	totalSpeeches := 0
+	for _, count := range speechCounts {
+		totalSpeeches += count
+	}
+
+	// Calculate average volatility
+	avgVolatility := 0.0
+	if len(volatilities) > 0 {
+		for _, v := range volatilities {
+			avgVolatility += v
+		}
+		avgVolatility /= float64(len(volatilities))
+	}
+
+	// Determine predominant contribution factor
+	cfactorCounts := map[service.ContributionFactor]int{}
+	for _, cf := range cfactors {
+		cfactorCounts[cf]++
+	}
+	var predominantCF service.ContributionFactor = "low"
+	maxCount := 0
+	for cf, count := range cfactorCounts {
+		if count > maxCount {
+			maxCount = count
+			predominantCF = cf
+		}
+	}
+
+	// Aggregate top topics
+	topicFrequency := make(map[int]int)
+	for _, topics := range topTopicsMap {
+		for _, topic := range topics {
+			topicFrequency[topic.ID]++
+		}
+	}
+
+	type topicCount struct {
+		topic types.Topic
+		count int
+	}
+	var topicCounts []topicCount
+	for topicID, count := range topicFrequency {
+		for _, topics := range topTopicsMap {
+			for _, topic := range topics {
+				if topic.ID == topicID {
+					topicCounts = append(topicCounts, topicCount{topic, count})
+					break
+				}
+			}
+		}
+	}
+
+	apiTopTopics := []api.TopTopic{}
+	for i := 0; i < len(topicCounts) && i < 3; i++ {
+		maxIdx := i
+		for j := i + 1; j < len(topicCounts); j++ {
+			if topicCounts[j].count > topicCounts[maxIdx].count {
+				maxIdx = j
+			}
+		}
+		if maxIdx != i {
+			topicCounts[i], topicCounts[maxIdx] = topicCounts[maxIdx], topicCounts[i]
+		}
+		topicName := topicCounts[i].topic.Name
+		stance := "neutral"
+		apiTopTopics = append(apiTopTopics, api.TopTopic{
+			Topic:  &topicName,
+			Stance: &stance,
+		})
+	}
+
+	// Get recent speeches
+	var recentSpeeches []api.SpeechSnippet
+	if len(personIDs) > 0 {
+		// Build query with IN clause
+		query := `
+			SELECT
+				a.id,
+				a.text,
+				p.date,
+				r.first_name || ' ' || r.last_name as speaker,
+				pg.name as party
+			FROM activities a
+			JOIN protocols p ON a.protocol_id = p.id
+			JOIN roles r ON a.role_id = r.id
+			LEFT JOIN parliamentary_groups pg ON r.group_id = pg.id
+			WHERE r.person_id IN (?) AND a.type LIKE 'Rede%'
+			ORDER BY p.date DESC
+			LIMIT 5
+		`
+		query, args, err := sqlx.In(query, personIDs)
+		if err == nil {
+			query = s.db.Rebind(query)
+			type SpeechRow struct {
+				ID      int            `db:"id"`
+				Text    string         `db:"text"`
+				Date    sql.NullTime   `db:"date"`
+				Speaker string         `db:"speaker"`
+				Party   sql.NullString `db:"party"`
+			}
+			var rows []SpeechRow
+			err = s.db.Select(&rows, query, args...)
+			if err == nil {
+				for _, row := range rows {
+					speechID := strconv.Itoa(row.ID)
+					text := row.Text
+					if len(text) > 200 {
+						text = text[:200] + "..."
+					}
+					speaker := row.Speaker
+					party := ""
+					if row.Party.Valid {
+						party = row.Party.String
+					}
+					var date *time.Time
+					if row.Date.Valid {
+						date = &row.Date.Time
+					}
+					sentiment := api.Neutral
+					recentSpeeches = append(recentSpeeches, api.SpeechSnippet{
+						Id:           &speechID,
+						FullSpeechId: &speechID,
+						Text:         &text,
+						Speaker:      &speaker,
+						Party:        &party,
+						Date:         date,
+						Sentiment:    &sentiment,
+					})
+				}
+			}
+		}
+	}
+
+	idStr := strconv.Itoa(group.ID)
+	name := group.Name
+	volatilityStr := fmt.Sprintf("%.2f", avgVolatility)
+
+	var apiCF api.PartyDetailContributionFactor
+	switch strings.ToLower(string(predominantCF)) {
+	case "high":
+		apiCF = api.PartyDetailContributionFactorHigh
+	case "medium":
+		apiCF = api.PartyDetailContributionFactorMedium
+	default:
+		apiCF = api.PartyDetailContributionFactorLow
+	}
+
+	partyDetail := api.PartyDetail{
+		Id:                 &idStr,
+		Name:               &name,
+		NumSpeeches:        &totalSpeeches,
+		Volatility:         &volatilityStr,
+		ContributionFactor: &apiCF,
+		TopTopics:          &apiTopTopics,
+		Members:            &members,
+		RecentSpeeches:     &recentSpeeches,
+	}
+
+	log.Printf("Returning party detail for ID %d", groupID)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(partyDetail)
+}
+*/
 
 func (s *Server) GetParliamentaryGroups(w http.ResponseWriter, r *http.Request, params api.GetParliamentaryGroupsParams) {
 	period := params.ElectionPeriod

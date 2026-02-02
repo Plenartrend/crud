@@ -55,6 +55,7 @@ paths:
           name: election_period
           schema:
             type: integer
+          required: true
           description: Filter politicians by election period ID.
         - in: query
           name: group_id
@@ -162,7 +163,6 @@ paths:
             type: string
           required: true
           description: The ID of the politician.
-        - $ref: '#/components/parameters/ElectionPeriodFilter'
         - $ref: '#/components/parameters/TimeRangeFilter'
       responses:
         '200':
@@ -231,6 +231,45 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ActivePolitician'
+
+  /parties:
+    get:
+      summary: List all parties
+      description: Retrieves a list of all parliamentary groups/parties.
+      parameters:
+        - $ref: '#/components/parameters/ElectionPeriodFilter'
+      responses:
+        '200':
+          description: A list of parties.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Party'
+
+  /parties/{id}:
+    get:
+      summary: Get a specific party
+      description: Retrieves detailed information about a specific party.
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: The ID of the party.
+        - $ref: '#/components/parameters/ElectionPeriodFilter'
+        - $ref: '#/components/parameters/TimeRangeFilter'
+      responses:
+        '200':
+          description: Detailed party information.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyDetail'
+        '404':
+          description: Party not found.
 
   /speeches:
     get:
@@ -389,16 +428,16 @@ components:
     ElectionPeriodFilter:
       in: query
       name: election_period
-      required: false
-      description: Filter by election period (Wahlperiode). If not provided, uses the most recent period for the politician.
+      required: true
+      description: Filter by election period (Wahlperiode).
       schema:
         type: integer
         minimum: 1
     TimeRangeFilter:
       in: query
       name: time_range
-      required: false
-      description: Time window for the time series. Omit for server default.
+      required: true
+      description: Time window for the time series.
       schema:
         $ref: '#/components/schemas/TimeRangeFilter'
   schemas:
@@ -654,6 +693,32 @@ components:
         - numSpeeches
         - wordCount
 
+    Party:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          description: Party name/abbreviation
+        volatility:
+          type: string
+          description: Volatility level (Niedrig, Mittel, Hoch)
+        contributionFactor:
+          type: string
+          enum: [low, medium, high]
+          description: Contribution factor level
+        numSpeeches:
+          type: integer
+          description: Number of speeches by party members in current year
+        numTopics:
+          type: integer
+          description: Number of top topics for this party
+        topTopics:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopTopic'
+
     TopicDetail:
       allOf:
         - $ref: '#/components/schemas/Topic'
@@ -728,6 +793,49 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/SpeechSnippet'
+
+    PartyDetail:
+      allOf:
+        - $ref: '#/components/schemas/Party'
+        - type: object
+          properties:
+            members:
+              type: array
+              items:
+                $ref: '#/components/schemas/Politician'
+              description: Party members
+            activityData:
+              type: array
+              items:
+                $ref: '#/components/schemas/TrendDataPoint'
+              description: Activity trend over time
+            drucksachen:
+              type: array
+              items:
+                $ref: '#/components/schemas/PrintedPaper'
+              description: Recent printed papers (Drucksachen)
+            recentSpeeches:
+              type: array
+              items:
+                $ref: '#/components/schemas/SpeechSnippet'
+              description: Recent speeches by party members
+
+    PrintedPaper:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+          description: Document type (e.g., Antrag, Gesetzentwurf)
+        number:
+          type: string
+          description: Document number (e.g., 20/1234)
+        date:
+          type: string
+          format: date-time
 
     SpeechDetail:
       allOf:
