@@ -1,7 +1,9 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	api "plenartrend/crud/src/openAPI"
@@ -9,6 +11,8 @@ import (
 	"plenartrend/crud/src/types"
 	"strconv"
 	"strings"
+
+	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -74,89 +78,325 @@ func (s *Server) GetDashboard(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func (s *Server) getPoliticians(ids []string) ([]api.Politician, error) {
+func (s *Server) getPoliticians(electionPeriod *int, groupID *int, pageSize int, offset int) ([]api.Politician, int, error) {
 	politicians := []api.Politician{}
+	log.Printf("Getting politicians for election period: %d, groupID: %v, pageSize: %d, offset: %d", electionPeriod, groupID, pageSize, offset)
 
-	var args []any
-	var err error
-
-	// TODO we don't have a lot of this data
-	// TODO don't hardcode election period -> should probably come from params
-	// TODO only return one record per person (currently one per role)? -> Which role to pick?
-	query := `
-		SELECT
-			1 as age,
-			0.6 as contributionFactor,
-			'd' as gender,
-			r.id,
-			'null' as image,
-			COALESCE(r.title, r.first_name || ' ' || COALESCE(r.name_suffix || ' ', '') || r.last_name || ', ' || r.name) as name,
-			pg.name as party,
-			'Deutschland' as region,
-			r.name as role,
-			null as similar,
-			null as topTopics,
-			'neutral' as volatility
-		FROM roles r, parliamentary_groups pg
-		WHERE r.election_period = 21
-			AND r.group_id = pg.id
-	`
-
-	if len(ids) > 0 {
-		log.Printf("Filtering politicians by IDs: %v", ids)
-
-		query, args, err = sqlx.In(query+" AND r.person_id IN (?)", ids)
-
-		if err != nil {
-			log.Printf("Failed to build query: %v", err)
-			return nil, err
-		}
-
-		query = s.db.Rebind(query)
+	// Default to latest election period if not specified
+	period := 21
+	if electionPeriod != nil {
+		period = *electionPeriod
 	}
 
-	err = s.db.Select(&politicians, query, args...)
-	return politicians, err
+	// Query with pagination
+	query := (`
+		SELECT r.*, pg.name as faction_name
+		FROM roles r
+		LEFT JOIN parliamentary_groups pg ON r.group_id = pg.id
+		JOIN (
+			SELECT person_id, MIN(id) as min_id
+			FROM roles
+			WHERE election_period = $1
+			GROUP BY person_id
+		) r2
+		ON r.id = r2.min_id
+		WHERE r.election_period = $1
+		AND CASE WHEN $4::integer IS NOT NULL THEN r.group_id = $4::integer ELSE TRUE END
+		ORDER BY r.last_name, r.first_name
+		LIMIT $2 OFFSET $3
+	`)
+
+	countQuery := (`
+		SELECT COUNT(r.*)
+		FROM roles r
+		LEFT JOIN parliamentary_groups pg ON r.group_id = pg.id
+		JOIN (
+			SELECT person_id, MIN(id) as min_id
+			FROM roles
+			WHERE election_period = $1
+			GROUP BY person_id
+		) r2
+		ON r.id = r2.min_id
+		WHERE r.election_period = $1
+		AND CASE WHEN $2::integer IS NOT NULL THEN r.group_id = $2::integer ELSE TRUE END
+	`)
+
+	var totalCount int
+	err := s.db.Get(&totalCount, s.db.Rebind(countQuery), period, groupID)
+	if err != nil {
+		log.Printf("Failed to count politicians: %v", err)
+		return nil, 0, err
+	}
+
+	log.Printf("Fetching politicians for election period: %d, groupID: %v, limit: %d, offset: %d", period, groupID, pageSize, offset)
+
+	type RoleWithFaction struct {
+		types.Role
+		FactionName sql.NullString `db:"faction_name"`
+	}
+
+	rolesWithFaction := []RoleWithFaction{}
+	err = s.db.Select(&rolesWithFaction, s.db.Rebind(query), period, pageSize, offset, groupID)
+	if err != nil {
+		log.Printf("Failed to query roles: %v", err)
+		return nil, 0, err
+	}
+
+	// Convert roles to politicians with analytics data
+	for _, roleWithFaction := range rolesWithFaction {
+		role := roleWithFaction.Role
+		cfactor, err := s.analyticsService.GetContributionFactor(period, role.PersonID)
+		if err != nil {
+			log.Printf("Failed to get contribution factor: %v", err)
+			cfactor = "low"
+		}
+
+		volatility, err := s.analyticsService.GetVolatility(period, role.PersonID)
+		if err != nil {
+			log.Printf("Failed to get volatility: %v", err)
+			volatility = 0
+		}
+
+		// Get top topics
+		topTopics, err := s.analyticsService.GetTopTopics(period, role.PersonID, 3)
+		if err != nil {
+			log.Printf("Failed to get top topics for person %d: %v", role.PersonID, err)
+			topTopics = []types.Topic{}
+		}
+
+		// Get number of speeches for this person
+		var numSpeeches int
+		speechQuery := `
+			SELECT COUNT(*) 
+			FROM activities a 
+			JOIN protocols p ON p.id = a.protocol_id
+			WHERE p.election_period = ? AND a.type LIKE 'Rede%' 
+			AND a.role_id IN (SELECT id FROM roles WHERE person_id = ?)
+		`
+		err = s.db.Get(&numSpeeches, s.db.Rebind(speechQuery), period, role.PersonID)
+		if err != nil {
+			log.Printf("Failed to get number of speeches for person %d: %v", role.PersonID, err)
+			numSpeeches = 0
+		}
+
+		// Convert to API types (pointers)
+		idStr := strconv.Itoa(role.PersonID)
+		name := role.FirstName + " " + role.LastName
+		party := ""
+		if roleWithFaction.FactionName.Valid {
+			party = roleWithFaction.FactionName.String
+		}
+		roleStr := ""
+		if role.RoleName.Valid {
+			roleStr = role.RoleName.String
+		}
+		volatilityStr := fmt.Sprintf("%.2f", volatility)
+
+		// Convert contribution factor to API enum type
+		cfactorStr := strings.ToLower(string(cfactor))
+		var apiContributionFactor api.PoliticianContributionFactor
+		switch cfactorStr {
+		case "high":
+			apiContributionFactor = api.PoliticianContributionFactorHigh
+		case "medium":
+			apiContributionFactor = api.PoliticianContributionFactorMedium
+		default:
+			apiContributionFactor = api.PoliticianContributionFactorLow
+		}
+
+		// Convert top topics to API format
+		apiTopTopics := make([]api.TopTopic, 0, len(topTopics))
+		for _, topic := range topTopics {
+			topicName := topic.Name
+			stance := "neutral" // We don't have stance data yet
+			apiTopTopics = append(apiTopTopics, api.TopTopic{
+				Topic:  &topicName,
+				Stance: &stance,
+			})
+		}
+
+		politician := api.Politician{
+			Id:                 &idStr,
+			Name:               &name,
+			Party:              &party,
+			Role:               &roleStr,
+			Volatility:         &volatilityStr,
+			ContributionFactor: &apiContributionFactor,
+			TopTopics:          &apiTopTopics,
+			NumSpeeches:        &numSpeeches,
+		}
+
+		politicians = append(politicians, politician)
+	}
+
+	return politicians, totalCount, nil
 }
 
 func (s *Server) GetPoliticians(w http.ResponseWriter, r *http.Request, params api.GetPoliticiansParams) {
-	politicians := []api.Politician{}
-	ids := []string{}
+	log.Printf("GetPoliticians called with params: %+v", params)
+	log.Printf("Raw query string: %s", r.URL.RawQuery)
 
-	if params.Ids != nil && *params.Ids != "" {
-		ids = strings.Split(*params.Ids, ",")
+	// Get pagination parameters
+	pageSize := 20
+	if params.PageSize != nil {
+		pageSize = *params.PageSize
 	}
 
-	politicians, err := s.getPoliticians(ids)
+	offset := 0
+	if params.Offset != nil {
+		offset = *params.Offset
+	}
+
+	var electionPeriod *int
+	if params.ElectionPeriod != nil {
+		electionPeriod = params.ElectionPeriod
+	}
+
+	var groupID *int
+	if params.GroupId != nil {
+		groupID = params.GroupId
+		log.Printf("Group ID filter received: %d", *groupID)
+	} else {
+		log.Printf("No group ID filter received")
+	}
+
+	politicians, totalCount, err := s.getPoliticians(electionPeriod, groupID, pageSize, offset)
 	if err != nil {
 		log.Printf("Failed to query politicians: %v", err)
 		http.Error(w, "Failed to query politicians", http.StatusInternalServerError)
 		return
 	}
 
+	// Calculate current page
+	page := (offset / pageSize) + 1
+
+	response := api.PaginatedPoliticians{
+		Data:       politicians,
+		TotalItems: totalCount,
+		Page:       page,
+		PageSize:   pageSize,
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(politicians)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func (s *Server) GetPoliticiansId(w http.ResponseWriter, r *http.Request, id string) {
-	politicians, err := s.getPoliticians([]string{id})
+	// Query directly for single politician by ID
+	period := 21 // Default to current period
 
-	if err != nil {
-		log.Printf("Failed to query politician: %v", err)
-		http.Error(w, "Failed to query politician", http.StatusInternalServerError)
-		return
+	query := `
+		SELECT r.*, pg.name as faction_name
+		FROM roles r
+		LEFT JOIN parliamentary_groups pg ON r.group_id = pg.id
+		WHERE r.person_id = ? AND r.election_period = ?
+		LIMIT 1
+	`
+
+	type RoleWithFaction struct {
+		types.Role
+		FactionName sql.NullString `db:"faction_name"`
 	}
 
-	if len(politicians) == 0 {
-		log.Printf("Politician not found: %v", id)
+	var roleWithFaction RoleWithFaction
+	err := s.db.Get(&roleWithFaction, s.db.Rebind(query), id, period)
+	if err != nil {
+		log.Printf("Failed to query politician: %v", err)
 		http.Error(w, "Politician not found", http.StatusNotFound)
 		return
 	}
 
+	role := roleWithFaction.Role
+
+	contributionFactor, err := s.analyticsService.GetContributionFactor(period, role.PersonID)
+	if err != nil {
+		log.Printf("Failed to get contribution factor: %v", err)
+		contributionFactor = "low"
+	}
+
+	volatility, err := s.analyticsService.GetVolatility(period, role.PersonID)
+	if err != nil {
+		log.Printf("Failed to get volatility: %v", err)
+		volatility = 0
+	}
+
+	// Convert to API types (pointers)
+	idStr := strconv.Itoa(role.PersonID)
+	name := role.FirstName + " " + role.LastName
+	party := ""
+	if roleWithFaction.FactionName.Valid {
+		party = roleWithFaction.FactionName.String
+	}
+	roleStr := ""
+	if role.RoleName.Valid {
+		roleStr = role.RoleName.String
+	}
+	volatilityStr := fmt.Sprintf("%.2f", volatility)
+
+	// Convert contribution factor to API enum type
+	contributionFactorStr := strings.ToLower(string(contributionFactor))
+	var apiContributionFactor api.PoliticianContributionFactor
+	switch contributionFactorStr {
+	case "high":
+		apiContributionFactor = api.PoliticianContributionFactorHigh
+	case "medium":
+		apiContributionFactor = api.PoliticianContributionFactorMedium
+	default:
+		apiContributionFactor = api.PoliticianContributionFactorLow
+	}
+
+	politician := api.Politician{
+		Id:                 &idStr,
+		Name:               &name,
+		Party:              &party,
+		Role:               &roleStr,
+		Volatility:         &volatilityStr,
+		ContributionFactor: &apiContributionFactor,
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(politicians[0])
+	_ = json.NewEncoder(w).Encode(politician)
+}
+
+func (s *Server) GetElectionPeriods(w http.ResponseWriter, r *http.Request) {
+	log.Printf("GetElectionPeriods called")
+
+	var periods []types.ElectionPeriod
+	err := s.db.Select(&periods, "SELECT * FROM election_periods ORDER BY number DESC")
+	if err != nil {
+		log.Printf("Failed to query election periods: %v", err)
+		http.Error(w, "Failed to query election periods", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Found %d election periods", len(periods))
+
+	// Convert to API response format
+	response := make([]api.ElectionPeriod, len(periods))
+	for i, p := range periods {
+		id := p.Number
+		number := p.Number
+		var startDate *openapi_types.Date
+		if p.StartDate.Valid {
+			startDate = &openapi_types.Date{Time: p.StartDate.Time}
+		}
+		var endDate *openapi_types.Date
+		if p.EndDate.Valid {
+			endDate = &openapi_types.Date{Time: p.EndDate.Time}
+		}
+
+		response[i] = api.ElectionPeriod{
+			Id:        &id,
+			Number:    &number,
+			StartDate: startDate,
+			EndDate:   endDate,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func (s *Server) GetReports(w http.ResponseWriter, r *http.Request) {
@@ -167,7 +407,8 @@ func (s *Server) GetReports(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) GetSearch(w http.ResponseWriter, r *http.Request, params api.GetSearchParams) {
-	politicians, err := s.getPoliticians(nil)
+	// Use a large page size to get all politicians for search
+	politicians, _, err := s.getPoliticians(nil, nil, 1000, 0)
 	if err != nil {
 		log.Printf("Failed to query politicians: %v", err)
 		http.Error(w, "Failed to query politicians", http.StatusInternalServerError)
@@ -397,4 +638,48 @@ func (s *Server) GetTopicsId(w http.ResponseWriter, r *http.Request, id string) 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(topicDetail)
+}
+
+func (s *Server) GetParliamentaryGroups(w http.ResponseWriter, r *http.Request, params api.GetParliamentaryGroupsParams) {
+	period := params.ElectionPeriod
+
+	log.Printf("Fetching parliamentary groups for election period: %d", period)
+
+	// Query groups that have at least one role in the specified election period
+	query := `
+		SELECT DISTINCT pg.id, pg.name
+		FROM parliamentary_groups pg
+		JOIN roles r ON r.group_id = pg.id
+		WHERE r.election_period = ?
+		ORDER BY pg.name
+	`
+
+	type GroupResult struct {
+		ID   int    `db:"id"`
+		Name string `db:"name"`
+	}
+
+	groups := []GroupResult{}
+	err := s.db.Select(&groups, s.db.Rebind(query), period)
+	if err != nil {
+		log.Printf("Failed to query parliamentary groups: %v", err)
+		http.Error(w, "Failed to query parliamentary groups", http.StatusInternalServerError)
+		return
+	}
+
+	// Convert to API types
+	apiGroups := []api.ParliamentaryGroup{}
+	for _, g := range groups {
+		id := g.ID
+		name := g.Name
+		apiGroups = append(apiGroups, api.ParliamentaryGroup{
+			Id:   &id,
+			Name: &name,
+		})
+	}
+
+	log.Printf("Found %d parliamentary groups", len(apiGroups))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(apiGroups)
 }

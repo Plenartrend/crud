@@ -2,6 +2,7 @@ package service
 
 import (
 	"database/sql"
+	"errors"
 	"log"
 	api "plenartrend/crud/src/openAPI"
 	"plenartrend/crud/src/types"
@@ -40,7 +41,7 @@ func (s *AnalyticsService) GetAnalysisTimeSeries(timeRange api.TimeRangeFilter, 
 	}
 
 	var rows []TimeSeriesRow
-	err = s.db.Select(&rows, 
+	err = s.db.Select(&rows,
 		`SELECT * FROM get_time_series_analytics($1, $2, 20, $3, $4, $5)`,
 		startDate, endDate, topicID, personID, groupID)
 	if err != nil {
@@ -78,74 +79,113 @@ func (s *AnalyticsService) GetAnalysisTimeSeries(timeRange api.TimeRangeFilter, 
 	return dataPoints, nil
 }
 
-func (s *AnalyticsService) getWeekDatesForTimeRange(timeRange string) ([]string, error) {
-	now := time.Now()
-	isoYear, isoWeek := now.ISOWeek()
+type ContributionFactor string
 
-	weekStart := func(year, week int) time.Time {
-		jan4 := time.Date(year, 1, 4, 0, 0, 0, 0, time.UTC)
-		jan4Weekday := int(jan4.Weekday())
-		if jan4Weekday == 0 {
-			jan4Weekday = 7
-		}
-		isoWeek1Monday := jan4.AddDate(0, 0, -jan4Weekday+1)
-		return isoWeek1Monday.AddDate(0, 0, (week-1)*7)
+const (
+	ContributionFactorHigh   ContributionFactor = "High"
+	ContributionFactorMedium ContributionFactor = "Medium"
+	ContributionFactorLow    ContributionFactor = "Low"
+)
+
+func getContributionFactor(factor float64) ContributionFactor {
+	if factor > 70 {
+		return ContributionFactorHigh
+	} else if factor > 30 {
+		return ContributionFactorMedium
+	} else {
+		return ContributionFactorLow
 	}
+}
 
-	getWeeks := func(numWeeks int) []string {
-		res := make([]string, numWeeks)
-		year, week := isoYear, isoWeek
-		for i := 0; i < numWeeks; i++ {
-			currWeek := week - i
-			currYear := year
-			for currWeek <= 0 {
-				currYear--
-				weeksLastYear := 52
-				lastYearDate := time.Date(currYear, 12, 28, 0, 0, 0, 0, time.UTC)
-				if _, lastWeek := lastYearDate.ISOWeek(); lastWeek == 53 {
-					weeksLastYear = 53
-				}
-				currWeek += weeksLastYear
-			}
-			ws := weekStart(currYear, currWeek)
-			res[i] = ws.Format("2006-01-02")
-		}
-		return res
+// TODO: Maybe instead compare to average number of activities per politician instead?
+func (s *AnalyticsService) GetContributionFactor(electionPeriod int, personID int) (ContributionFactor, error) {
+	query := `
+		WITH contributions AS (
+			SELECT r.person_id, COUNT(*) AS cnt
+			FROM activities a
+			JOIN roles r ON r.id = a.role_id
+			JOIN protocols p ON p.id = a.protocol_id
+			WHERE p.election_period = $1 AND a.type LIKE 'Rede%'
+			GROUP BY r.person_id
+		), max_count AS (
+			SELECT MAX(cnt) AS max_cnt FROM contributions
+		)
+		SELECT 
+			(c.cnt::FLOAT / m.max_cnt::FLOAT) * 100 AS relative_percentage
+		FROM contributions c
+		CROSS JOIN max_count m
+		WHERE c.person_id = $2
+		LIMIT 1
+    `
+	var contributionFactor float64
+	err := s.db.Get(&contributionFactor, query, electionPeriod, personID)
+	if err != nil {
+		log.Printf("Failed to get contribution factor: %v", err)
+		return ContributionFactorLow, err
 	}
+	return getContributionFactor(contributionFactor), nil
+}
 
-	var weekDates []string
-	switch timeRange {
-	case "last_month":
-		weekDates = getWeeks(4)
-	case "last_6_months":
-		weekDates = getWeeks(26)
-	case "ytd":
-		weekDates = getWeeks(isoWeek)
-		log.Printf("YTD: Generated %d weeks with getWeeks(%d)", len(weekDates), isoWeek)
-		if len(weekDates) > 0 {
-			log.Printf("YTD weekDates[0] (newest): %s", weekDates[0])
-			log.Printf("YTD weekDates[last] (oldest): %s", weekDates[len(weekDates)-1])
+func (s *AnalyticsService) GetVolatility(electionPeriod int, personID int) (float64, error) {
+	query := `
+	   SELECT * FROM get_volatility_for_election_period($1, $2, $3, $4)
+	`
+	var volatility sql.NullFloat64
+	err := s.db.Get(&volatility, query, electionPeriod, personID, nil, nil)
+	if err != nil {
+		// If there are no rows, treat as 0.0
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0.0, nil
 		}
-	case "last_year":
-		weekDates = getWeeks(52)
-	case "last_2_years":
-		weekDates = getWeeks(104)
-	case "last_5_years":
-		weekDates = getWeeks(260)
-	case "max":
-		firstProtocolDate, lastProtocolDate, err := s.getFirstAndLastAnalyzedDate()
-		if err != nil {
-			log.Printf("Failed to get first and last analyzed date: %v", err)
-			return nil, err
-		}
-		numWeeks := int(lastProtocolDate.Sub(firstProtocolDate).Hours() / 24 / 7)
-		weekDates = getWeeks(numWeeks)
-	default:
-		log.Printf("Invalid time_range parameter: %s", timeRange)
-		return nil, nil
+		log.Printf("Failed to get volatility: %v", err)
+		return 0, err
 	}
+	if !volatility.Valid {
+		return 0, nil
+	}
+	return volatility.Float64, nil
+}
 
-	return weekDates, nil
+// TODO: Maybe only show speeches we actually analyzed?
+func (s *AnalyticsService) GetNumberOfSpeeches(electionPeriod int, personId int) (int, error) {
+	query := `
+	   SELECT COUNT(*) as number_of_speeches FROM activities a JOIN protocols p ON p.id = a.protocol_id JOIN activity_mappings am ON am.activity_id = a.id
+	   WHERE p.election_period = $1 AND a.type LIKE 'Rede%' AND a.role_id IN (SELECT id FROM roles WHERE person_id = $2)
+	`
+	var numOfSpeeches int
+	err := s.db.Get(&numOfSpeeches, query, electionPeriod, personId)
+	if err != nil {
+		log.Printf("Failed to get number of speeches: %v", err)
+		return 0, err
+	}
+	return numOfSpeeches, nil
+}
+
+func (s *AnalyticsService) GetTopTopics(electionPeriod int, personID int, numOfTopics int) ([]types.Topic, error) {
+	log.Printf("Getting top topics for person %d in election period %d", personID, electionPeriod)
+	query := `
+		WITH top_topics AS (
+			SELECT am.topic_id, COUNT(*) AS activity_count
+			FROM activity_mappings am
+					JOIN activities a ON a.id = am.activity_id
+					JOIN roles r ON r.id = a.role_id JOIN protocols p ON p.id = a.protocol_id
+			WHERE r.person_id = $1 AND p.election_period = $2
+			GROUP BY am.topic_id 
+			ORDER BY activity_count DESC
+			LIMIT $3
+		)
+		SELECT t.id, t.name, t.updated, t.created
+		FROM topics t
+				JOIN top_topics tt ON t.id = tt.topic_id;
+	`
+	var topTopics []types.Topic
+	err := s.db.Select(&topTopics, query, personID, electionPeriod, numOfTopics)
+	if err != nil {
+		log.Printf("Failed to get top topics: %v", err)
+		return nil, err
+	}
+	log.Printf("Found %d top topics for person %d in election period %d", len(topTopics), personID, electionPeriod)
+	return topTopics, nil
 }
 
 func (s *AnalyticsService) getFirstAndLastAnalyzedDate() (time.Time, time.Time, error) {
@@ -355,20 +395,14 @@ func (s *AnalyticsService) getStakeholders(topicID int) ([]api.Politician, []api
 		}
 
 		personIDStr := strconv.Itoa(ranking.PersonID)
-		contributionFactor := float32(ranking.Score)
-		gender := "d"
-		image := "null"
-		region := "Deutschland"
-		roleStr := "mock"
+		dummyContributionFactor := api.PoliticianContributionFactorMedium // Dummy value, not used in getStakeholders
+		roleStr := "mock"                                                 //Not relevant here
 
 		politician := api.Politician{
-			ContributionFactor: &contributionFactor,
-			Gender:             &gender,
+			ContributionFactor: &dummyContributionFactor,
 			Id:                 &personIDStr,
-			Image:              &image,
 			Name:               &fullName,
 			Party:              &groupName,
-			Region:             &region,
 			Role:               &roleStr,
 			Similar:            nil,
 			TopTopics:          nil,

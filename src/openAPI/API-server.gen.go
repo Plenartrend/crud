@@ -30,6 +30,20 @@ const (
 	FullSpeechSentimentStarkPositiv FullSpeechSentiment = "stark positiv"
 )
 
+// Defines values for PoliticianContributionFactor.
+const (
+	PoliticianContributionFactorHigh   PoliticianContributionFactor = "high"
+	PoliticianContributionFactorLow    PoliticianContributionFactor = "low"
+	PoliticianContributionFactorMedium PoliticianContributionFactor = "medium"
+)
+
+// Defines values for PoliticianDetailContributionFactor.
+const (
+	PoliticianDetailContributionFactorHigh   PoliticianDetailContributionFactor = "high"
+	PoliticianDetailContributionFactorLow    PoliticianDetailContributionFactor = "low"
+	PoliticianDetailContributionFactorMedium PoliticianDetailContributionFactor = "medium"
+)
+
 // Defines values for SpeechDetailSentiment.
 const (
 	SpeechDetailSentimentNegativ      SpeechDetailSentiment = "negativ"
@@ -120,6 +134,21 @@ type DashboardStats struct {
 	Value      *string `json:"value,omitempty"`
 }
 
+// ElectionPeriod defines model for ElectionPeriod.
+type ElectionPeriod struct {
+	// EndDate End date of the election period (null if ongoing).
+	EndDate *openapi_types.Date `json:"end_date"`
+
+	// Id Unique identifier for the election period.
+	Id *int `json:"id,omitempty"`
+
+	// Number The election period number (e.g., 20 for the 20th Bundestag).
+	Number *int `json:"number,omitempty"`
+
+	// StartDate Start date of the election period.
+	StartDate *openapi_types.Date `json:"start_date,omitempty"`
+}
+
 // FullSpeech defines model for FullSpeech.
 type FullSpeech struct {
 	Content       *string              `json:"content,omitempty"`
@@ -148,6 +177,21 @@ type NotificationDetails struct {
 	SpeechId *string `json:"speechId,omitempty"`
 }
 
+// PaginatedPoliticians Paginated response containing a page of politicians and pagination metadata.
+type PaginatedPoliticians struct {
+	// Data Page of politicians.
+	Data []Politician `json:"data"`
+
+	// Page Current page (1-based), computed by backend from offset and page_size.
+	Page int `json:"page"`
+
+	// PageSize Number of items per page.
+	PageSize int `json:"page_size"`
+
+	// TotalItems Total number of politicians across all pages.
+	TotalItems int `json:"total_items"`
+}
+
 // PaginatedTopics Paginated response containing a page of topics and pagination metadata.
 type PaginatedTopics struct {
 	// Data Page of topics.
@@ -163,6 +207,12 @@ type PaginatedTopics struct {
 	TotalItems int `json:"total_items"`
 }
 
+// ParliamentaryGroup defines model for ParliamentaryGroup.
+type ParliamentaryGroup struct {
+	Id   *int    `json:"id,omitempty"`
+	Name *string `json:"name,omitempty"`
+}
+
 // PartyPosition defines model for PartyPosition.
 type PartyPosition struct {
 	Party     *string  `json:"party,omitempty"`
@@ -172,37 +222,44 @@ type PartyPosition struct {
 
 // Politician defines model for Politician.
 type Politician struct {
-	Age                *int        `json:"age,omitempty"`
-	ContributionFactor *float32    `json:"contributionFactor,omitempty"`
-	Gender             *string     `json:"gender,omitempty"`
-	Id                 *string     `json:"id,omitempty"`
-	Image              *string     `json:"image,omitempty"`
-	Name               *string     `json:"name,omitempty"`
-	Party              *string     `json:"party,omitempty"`
-	Region             *string     `json:"region,omitempty"`
-	Role               *string     `json:"role,omitempty"`
-	Similar            *[]string   `json:"similar,omitempty"`
-	TopTopics          *[]TopTopic `json:"topTopics,omitempty"`
-	Volatility         *string     `json:"volatility,omitempty"`
+	// ContributionFactor Contribution factor level
+	ContributionFactor *PoliticianContributionFactor `json:"contributionFactor,omitempty"`
+	Id                 *string                       `json:"id,omitempty"`
+	Name               *string                       `json:"name,omitempty"`
+
+	// NumSpeeches Number of speeches given by this politician
+	NumSpeeches *int        `json:"numSpeeches,omitempty"`
+	Party       *string     `json:"party,omitempty"`
+	Role        *string     `json:"role,omitempty"`
+	Similar     *[]string   `json:"similar,omitempty"`
+	TopTopics   *[]TopTopic `json:"topTopics,omitempty"`
+	Volatility  *string     `json:"volatility,omitempty"`
 }
+
+// PoliticianContributionFactor Contribution factor level
+type PoliticianContributionFactor string
 
 // PoliticianDetail defines model for PoliticianDetail.
 type PoliticianDetail struct {
-	ActivityData       *[]TrendDataPoint `json:"activityData,omitempty"`
-	Age                *int              `json:"age,omitempty"`
-	ContributionFactor *float32          `json:"contributionFactor,omitempty"`
-	Gender             *string           `json:"gender,omitempty"`
-	Id                 *string           `json:"id,omitempty"`
-	Image              *string           `json:"image,omitempty"`
-	Name               *string           `json:"name,omitempty"`
-	Party              *string           `json:"party,omitempty"`
-	Region             *string           `json:"region,omitempty"`
-	Role               *string           `json:"role,omitempty"`
-	Similar            *[]string         `json:"similar,omitempty"`
-	Speeches           *[]FullSpeech     `json:"speeches,omitempty"`
-	TopTopics          *[]TopTopic       `json:"topTopics,omitempty"`
-	Volatility         *string           `json:"volatility,omitempty"`
+	ActivityData *[]TrendDataPoint `json:"activityData,omitempty"`
+
+	// ContributionFactor Contribution factor level
+	ContributionFactor *PoliticianDetailContributionFactor `json:"contributionFactor,omitempty"`
+	Id                 *string                             `json:"id,omitempty"`
+	Name               *string                             `json:"name,omitempty"`
+
+	// NumSpeeches Number of speeches given by this politician
+	NumSpeeches *int          `json:"numSpeeches,omitempty"`
+	Party       *string       `json:"party,omitempty"`
+	Role        *string       `json:"role,omitempty"`
+	Similar     *[]string     `json:"similar,omitempty"`
+	Speeches    *[]FullSpeech `json:"speeches,omitempty"`
+	TopTopics   *[]TopTopic   `json:"topTopics,omitempty"`
+	Volatility  *string       `json:"volatility,omitempty"`
 }
+
+// PoliticianDetailContributionFactor Contribution factor level
+type PoliticianDetailContributionFactor string
 
 // Report defines model for Report.
 type Report struct {
@@ -351,10 +408,25 @@ type GetAnalysisTimeSeriesParams struct {
 	GroupId *int `form:"group_id,omitempty" json:"group_id,omitempty"`
 }
 
+// GetParliamentaryGroupsParams defines parameters for GetParliamentaryGroups.
+type GetParliamentaryGroupsParams struct {
+	// ElectionPeriod Election period ID.
+	ElectionPeriod int `form:"election_period" json:"election_period"`
+}
+
 // GetPoliticiansParams defines parameters for GetPoliticians.
 type GetPoliticiansParams struct {
-	// Ids Comma-separated list of IDs to filter by.
-	Ids *string `form:"ids,omitempty" json:"ids,omitempty"`
+	// PageSize Number of items per page. Default is 20, maximum is 100.
+	PageSize *PageSize `form:"page_size,omitempty" json:"page_size,omitempty"`
+
+	// Offset Number of items to skip (for pagination). Default is 0.
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// ElectionPeriod Filter politicians by election period ID.
+	ElectionPeriod *int `form:"election_period,omitempty" json:"election_period,omitempty"`
+
+	// GroupId Filter politicians by parliamentary group ID.
+	GroupId *int `form:"group_id,omitempty" json:"group_id,omitempty"`
 }
 
 // GetSearchParams defines parameters for GetSearch.
@@ -386,9 +458,15 @@ type ServerInterface interface {
 	// Get dashboard data
 	// (GET /dashboard)
 	GetDashboard(w http.ResponseWriter, r *http.Request)
+	// List all election periods
+	// (GET /election-periods)
+	GetElectionPeriods(w http.ResponseWriter, r *http.Request)
 	// Health check endpoint
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
+	// List parliamentary groups for election period
+	// (GET /parliamentary-groups)
+	GetParliamentaryGroups(w http.ResponseWriter, r *http.Request, params GetParliamentaryGroupsParams)
 	// List all politicians
 	// (GET /politicians)
 	GetPoliticians(w http.ResponseWriter, r *http.Request, params GetPoliticiansParams)
@@ -517,11 +595,59 @@ func (siw *ServerInterfaceWrapper) GetDashboard(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// GetElectionPeriods operation middleware
+func (siw *ServerInterfaceWrapper) GetElectionPeriods(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetElectionPeriods(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetHealth operation middleware
 func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetParliamentaryGroups operation middleware
+func (siw *ServerInterfaceWrapper) GetParliamentaryGroups(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetParliamentaryGroupsParams
+
+	// ------------- Required query parameter "election_period" -------------
+
+	if paramValue := r.URL.Query().Get("election_period"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "election_period"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "election_period", r.URL.Query(), &params.ElectionPeriod)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "election_period", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetParliamentaryGroups(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -539,11 +665,35 @@ func (siw *ServerInterfaceWrapper) GetPoliticians(w http.ResponseWriter, r *http
 	// Parameter object where we will unmarshal all parameters from the context
 	var params GetPoliticiansParams
 
-	// ------------- Optional query parameter "ids" -------------
+	// ------------- Optional query parameter "page_size" -------------
 
-	err = runtime.BindQueryParameter("form", true, false, "ids", r.URL.Query(), &params.Ids)
+	err = runtime.BindQueryParameter("form", true, false, "page_size", r.URL.Query(), &params.PageSize)
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ids", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_size", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "offset", r.URL.Query(), &params.Offset)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "election_period" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "election_period", r.URL.Query(), &params.ElectionPeriod)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "election_period", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "group_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "group_id", r.URL.Query(), &params.GroupId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group_id", Err: err})
 		return
 	}
 
@@ -847,7 +997,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/analysis/time-series", wrapper.GetAnalysisTimeSeries)
 	m.HandleFunc("GET "+options.BaseURL+"/bundestag/status", wrapper.GetBundestagStatus)
 	m.HandleFunc("GET "+options.BaseURL+"/dashboard", wrapper.GetDashboard)
+	m.HandleFunc("GET "+options.BaseURL+"/election-periods", wrapper.GetElectionPeriods)
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.GetHealth)
+	m.HandleFunc("GET "+options.BaseURL+"/parliamentary-groups", wrapper.GetParliamentaryGroups)
 	m.HandleFunc("GET "+options.BaseURL+"/politicians", wrapper.GetPoliticians)
 	m.HandleFunc("GET "+options.BaseURL+"/politicians/{id}", wrapper.GetPoliticiansId)
 	m.HandleFunc("GET "+options.BaseURL+"/reports", wrapper.GetReports)

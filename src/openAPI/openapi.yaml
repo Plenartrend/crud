@@ -47,22 +47,62 @@ paths:
   /politicians:
     get:
       summary: List all politicians
-      description: Retrieves a list of all politicians.
+      description: Retrieves a paginated list of all politicians.
       parameters:
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Offset'
         - in: query
-          name: ids
+          name: election_period
           schema:
-            type: string
-          description: Comma-separated list of IDs to filter by.
+            type: integer
+          description: Filter politicians by election period ID.
+        - in: query
+          name: group_id
+          schema:
+            type: integer
+          description: Filter politicians by parliamentary group ID.
       responses:
         '200':
-          description: A list of politicians.
+          description: Paginated list of politicians.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPoliticians'
+
+  /parliamentary-groups:
+    get:
+      summary: List parliamentary groups for election period
+      description: Retrieves parliamentary groups that have members in a specific election period.
+      parameters:
+        - in: query
+          name: election_period
+          schema:
+            type: integer
+          required: true
+          description: Election period ID.
+      responses:
+        '200':
+          description: A list of parliamentary groups.
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/Politician'
+                  $ref: '#/components/schemas/ParliamentaryGroup'
+
+  /election-periods:
+    get:
+      summary: List all election periods
+      description: Retrieves a list of all election periods ordered by number descending (newest first).
+      responses:
+        '200':
+          description: A list of election periods.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ElectionPeriod'
 
   /politicians/{id}:
     get:
@@ -396,6 +436,55 @@ components:
         stance:
           type: string
 
+    ElectionPeriod:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Unique identifier for the election period.
+        number:
+          type: integer
+          description: The election period number (e.g., 20 for the 20th Bundestag).
+        start_date:
+          type: string
+          format: date
+          description: Start date of the election period.
+        end_date:
+          type: string
+          format: date
+          nullable: true
+          description: End date of the election period (null if ongoing).
+
+    PaginatedPoliticians:
+      type: object
+      description: Paginated response containing a page of politicians and pagination metadata.
+      required: [data, total_items, page, page_size]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Politician'
+          description: Page of politicians.
+        total_items:
+          type: integer
+          description: Total number of politicians across all pages.
+        page:
+          type: integer
+          minimum: 1
+          description: Current page (1-based), computed by backend from offset and page_size.
+        page_size:
+          type: integer
+          minimum: 1
+          description: Number of items per page.
+
+    ParliamentaryGroup:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+
     Politician:
       type: object
       properties:
@@ -407,18 +496,15 @@ components:
           type: string
         role:
           type: string
-        region:
-          type: string
-        age:
-          type: integer
-        gender:
-          type: string
         volatility:
           type: string
         contributionFactor:
-          type: number
-        image:
           type: string
+          enum: [low, medium, high]
+          description: Contribution factor level
+        numSpeeches:
+          type: integer
+          description: Number of speeches given by this politician
         topTopics:
           type: array
           items:
