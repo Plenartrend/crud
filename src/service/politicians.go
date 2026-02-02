@@ -395,23 +395,39 @@ func (s *PoliticiansService) GetPoliticianWordcloud(personID int) ([]api.WordClo
 		return nil, err
 	}
 
-	// Sort by tfidf value (descending)
-	sort.Slice(tfidfEntries, func(i, j int) bool {
-		return tfidfEntries[i].Tfidf > tfidfEntries[j].Tfidf
+	// Group by term and keep the highest tfidf value for each unique word
+	wordMap := make(map[string]float64)
+	for _, entry := range tfidfEntries {
+		if currentTfidf, exists := wordMap[entry.Term]; !exists || entry.Tfidf > currentTfidf {
+			wordMap[entry.Term] = entry.Tfidf
+		}
+	}
+
+	// Convert map to slice and sort by tfidf value (descending)
+	type WordTfidf struct {
+		Word  string
+		Tfidf float64
+	}
+	uniqueWords := make([]WordTfidf, 0, len(wordMap))
+	for word, tfidf := range wordMap {
+		uniqueWords = append(uniqueWords, WordTfidf{Word: word, Tfidf: tfidf})
+	}
+
+	sort.Slice(uniqueWords, func(i, j int) bool {
+		return uniqueWords[i].Tfidf > uniqueWords[j].Tfidf
 	})
 
-	// Take top 10
+	// Take top 10 unique words
 	maxItems := 10
-	if len(tfidfEntries) < maxItems {
-		maxItems = len(tfidfEntries)
+	if len(uniqueWords) < maxItems {
+		maxItems = len(uniqueWords)
 	}
 
 	wordcloudItems := make([]api.WordCloudItem, 0, maxItems)
 	for i := 0; i < maxItems; i++ {
-		entry := tfidfEntries[i]
 		wordcloudItems = append(wordcloudItems, api.WordCloudItem{
-			Word:   entry.Term,
-			Weight: float32(entry.Tfidf),
+			Word:   uniqueWords[i].Word,
+			Weight: float32(uniqueWords[i].Tfidf),
 		})
 	}
 
