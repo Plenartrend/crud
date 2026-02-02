@@ -125,6 +125,62 @@ paths:
         '404':
           description: Politician not found.
 
+  /politicians/most-active:
+    get:
+      summary: Get most active politicians
+      description: Retrieves a list of the most active politicians based on number of speeches and words spoken.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+          description: Maximum number of politicians to return.
+        - in: query
+          name: election_period
+          schema:
+            type: integer
+          description: Filter by election period ID. Defaults to the latest election period.
+      responses:
+        '200':
+          description: List of most active politicians.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ActivePolitician'
+
+  /politicians/least-active:
+    get:
+      summary: Get least active politicians
+      description: Retrieves a list of the least active politicians based on number of speeches and words spoken.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+          description: Maximum number of politicians to return.
+        - in: query
+          name: election_period
+          schema:
+            type: integer
+          description: Filter by election period ID. Defaults to the latest election period.
+      responses:
+        '200':
+          description: List of least active politicians.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ActivePolitician'
+
   /speeches:
     get:
       summary: List all speeches
@@ -512,6 +568,27 @@ components:
           type: array
           items:
             type: string
+
+    ActivePolitician:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Full name of the politician
+        party:
+          type: string
+          description: Political party or parliamentary group
+        numSpeeches:
+          type: integer
+          description: Number of speeches given by this politician
+        wordCount:
+          type: integer
+          description: Total number of words spoken by this politician
+      required:
+        - name
+        - party
+        - numSpeeches
+        - wordCount
 
     TopicDetail:
       allOf:

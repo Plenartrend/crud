@@ -2,6 +2,7 @@ package service
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	api "plenartrend/crud/src/openAPI"
 	"plenartrend/crud/src/types"
@@ -587,4 +588,61 @@ func (s *AnalyticsService) getSpeechSnippets(topicID int) ([]api.SpeechSnippet, 
 	}
 	log.Printf("Built %d speech snippets", len(speeches))
 	return speeches, nil
+}
+
+func (s *AnalyticsService) GetActivePoliticians(electionPeriod int, limit int, mostActive bool) ([]api.ActivePolitician, error) {
+	var orderBy string
+	if mostActive {
+		orderBy = "ORDER BY num_speeches DESC, word_count DESC"
+	} else {
+		orderBy = "ORDER BY num_speeches ASC, word_count ASC"
+	}
+
+	query := fmt.Sprintf(`
+		SELECT 
+			r.first_name || ' ' || r.last_name AS name,
+			COALESCE(pg.name, 'Unbekannt') AS party,
+			COUNT(DISTINCT a.id) AS num_speeches,
+			COALESCE(SUM(array_length(string_to_array(TRIM(a.text), ' '), 1)), 0)::int AS word_count
+		FROM roles r
+		LEFT JOIN parliamentary_groups pg ON r.group_id = pg.id
+		JOIN activities a ON a.role_id = r.id
+		JOIN protocols p ON p.id = a.protocol_id
+		WHERE p.election_period = $1
+		AND a.type LIKE 'Rede%%'
+		AND a.text IS NOT NULL
+		AND TRIM(a.text) != ''
+		GROUP BY r.person_id, r.first_name, r.last_name, pg.name
+		HAVING COUNT(DISTINCT a.id) > 0
+		%s
+		LIMIT $2
+	`, orderBy)
+
+	type Result struct {
+		Name        string `db:"name"`
+		Party       string `db:"party"`
+		NumSpeeches int    `db:"num_speeches"`
+		WordCount   int    `db:"word_count"`
+	}
+
+	var results []Result
+	err := s.db.Select(&results, query, electionPeriod, limit)
+	if err != nil {
+		log.Printf("Failed to get active politicians: %v", err)
+		return nil, err
+	}
+
+	log.Printf("Got %d active politician results for election period %d", len(results), electionPeriod)
+
+	activePoliticians := make([]api.ActivePolitician, len(results))
+	for i, r := range results {
+		activePoliticians[i] = api.ActivePolitician{
+			Name:        r.Name,
+			Party:       r.Party,
+			NumSpeeches: r.NumSpeeches,
+			WordCount:   r.WordCount,
+		}
+	}
+
+	return activePoliticians, nil
 }

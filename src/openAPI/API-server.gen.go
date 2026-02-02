@@ -87,6 +87,21 @@ const (
 	TopicDetailTrendUp     TopicDetailTrend = "up"
 )
 
+// ActivePolitician defines model for ActivePolitician.
+type ActivePolitician struct {
+	// Name Full name of the politician
+	Name string `json:"name"`
+
+	// NumSpeeches Number of speeches given by this politician
+	NumSpeeches int `json:"numSpeeches"`
+
+	// Party Political party or parliamentary group
+	Party string `json:"party"`
+
+	// WordCount Total number of words spoken by this politician
+	WordCount int `json:"wordCount"`
+}
+
 // Alert defines model for Alert.
 type Alert struct {
 	Category  *string              `json:"category,omitempty"`
@@ -429,6 +444,24 @@ type GetPoliticiansParams struct {
 	GroupId *int `form:"group_id,omitempty" json:"group_id,omitempty"`
 }
 
+// GetPoliticiansLeastActiveParams defines parameters for GetPoliticiansLeastActive.
+type GetPoliticiansLeastActiveParams struct {
+	// Limit Maximum number of politicians to return.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// ElectionPeriod Filter by election period ID. Defaults to the latest election period.
+	ElectionPeriod *int `form:"election_period,omitempty" json:"election_period,omitempty"`
+}
+
+// GetPoliticiansMostActiveParams defines parameters for GetPoliticiansMostActive.
+type GetPoliticiansMostActiveParams struct {
+	// Limit Maximum number of politicians to return.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// ElectionPeriod Filter by election period ID. Defaults to the latest election period.
+	ElectionPeriod *int `form:"election_period,omitempty" json:"election_period,omitempty"`
+}
+
 // GetSearchParams defines parameters for GetSearch.
 type GetSearchParams struct {
 	// Q The search query string.
@@ -470,6 +503,12 @@ type ServerInterface interface {
 	// List all politicians
 	// (GET /politicians)
 	GetPoliticians(w http.ResponseWriter, r *http.Request, params GetPoliticiansParams)
+	// Get least active politicians
+	// (GET /politicians/least-active)
+	GetPoliticiansLeastActive(w http.ResponseWriter, r *http.Request, params GetPoliticiansLeastActiveParams)
+	// Get most active politicians
+	// (GET /politicians/most-active)
+	GetPoliticiansMostActive(w http.ResponseWriter, r *http.Request, params GetPoliticiansMostActiveParams)
 	// Get a specific politician
 	// (GET /politicians/{id})
 	GetPoliticiansId(w http.ResponseWriter, r *http.Request, id string)
@@ -699,6 +738,76 @@ func (siw *ServerInterfaceWrapper) GetPoliticians(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetPoliticians(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPoliticiansLeastActive operation middleware
+func (siw *ServerInterfaceWrapper) GetPoliticiansLeastActive(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPoliticiansLeastActiveParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "election_period" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "election_period", r.URL.Query(), &params.ElectionPeriod)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "election_period", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPoliticiansLeastActive(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPoliticiansMostActive operation middleware
+func (siw *ServerInterfaceWrapper) GetPoliticiansMostActive(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPoliticiansMostActiveParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "election_period" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "election_period", r.URL.Query(), &params.ElectionPeriod)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "election_period", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPoliticiansMostActive(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1001,6 +1110,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.GetHealth)
 	m.HandleFunc("GET "+options.BaseURL+"/parliamentary-groups", wrapper.GetParliamentaryGroups)
 	m.HandleFunc("GET "+options.BaseURL+"/politicians", wrapper.GetPoliticians)
+	m.HandleFunc("GET "+options.BaseURL+"/politicians/least-active", wrapper.GetPoliticiansLeastActive)
+	m.HandleFunc("GET "+options.BaseURL+"/politicians/most-active", wrapper.GetPoliticiansMostActive)
 	m.HandleFunc("GET "+options.BaseURL+"/politicians/{id}", wrapper.GetPoliticiansId)
 	m.HandleFunc("GET "+options.BaseURL+"/reports", wrapper.GetReports)
 	m.HandleFunc("GET "+options.BaseURL+"/search", wrapper.GetSearch)

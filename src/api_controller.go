@@ -712,3 +712,59 @@ func (s *Server) GetParliamentaryGroups(w http.ResponseWriter, r *http.Request, 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(apiGroups)
 }
+
+func (s *Server) GetPoliticiansMostActive(w http.ResponseWriter, r *http.Request, params api.GetPoliticiansMostActiveParams) {
+	limit := 10
+	if params.Limit != nil {
+		limit = *params.Limit
+		if limit < 1 || limit > 100 {
+			limit = 10
+		}
+	}
+
+	period := 21
+	if params.ElectionPeriod != nil {
+		period = *params.ElectionPeriod
+	}
+
+	log.Printf("GetPoliticiansMostActive called with limit=%d, election_period=%d", limit, period)
+
+	activePoliticians, err := s.analyticsService.GetActivePoliticians(period, limit, true)
+	if err != nil {
+		log.Printf("Failed to get most active politicians: %v", err)
+		http.Error(w, "Failed to get most active politicians", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(activePoliticians)
+}
+
+func (s *Server) GetPoliticiansLeastActive(w http.ResponseWriter, r *http.Request, params api.GetPoliticiansLeastActiveParams) {
+	limit := 10
+	if params.Limit != nil {
+		limit = *params.Limit
+		if limit < 1 || limit > 100 {
+			limit = 10
+		}
+	}
+
+	period := 21
+	if params.ElectionPeriod != nil {
+		period = *params.ElectionPeriod
+	}
+
+	log.Printf("GetPoliticiansLeastActive called with limit=%d, election_period=%d", limit, period)
+
+	activePoliticians, err := s.analyticsService.GetActivePoliticians(period, limit, false)
+	if err != nil {
+		log.Printf("Failed to get least active politicians: %v", err)
+		http.Error(w, "Failed to get least active politicians", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(activePoliticians)
+}
