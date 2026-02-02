@@ -601,17 +601,18 @@ func (s *AnalyticsService) GetActivePoliticians(electionPeriod int, limit int, m
 	query := fmt.Sprintf(`
 		SELECT 
 			r.first_name || ' ' || r.last_name AS name,
-			COALESCE(pg.name, 'Unbekannt') AS party,
+			pg.name AS party,
 			COUNT(DISTINCT a.id) AS num_speeches,
 			COALESCE(SUM(array_length(string_to_array(TRIM(a.text), ' '), 1)), 0)::int AS word_count
 		FROM roles r
-		LEFT JOIN parliamentary_groups pg ON r.group_id = pg.id
+		JOIN parliamentary_groups pg ON r.group_id = pg.id
 		JOIN activities a ON a.role_id = r.id
 		JOIN protocols p ON p.id = a.protocol_id
 		WHERE p.election_period = $1
 		AND a.type LIKE 'Rede%%'
 		AND a.text IS NOT NULL
 		AND TRIM(a.text) != ''
+		AND pg.name IS NOT NULL
 		GROUP BY r.person_id, r.first_name, r.last_name, pg.name
 		HAVING COUNT(DISTINCT a.id) > 0
 		%s
