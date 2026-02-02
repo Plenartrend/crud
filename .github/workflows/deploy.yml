@@ -10,7 +10,7 @@ permissions:
 jobs:
   push_to_registry:
     name: Push Docker image to Nexus
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     environment: production
     steps:
       - name: Check out the repo
