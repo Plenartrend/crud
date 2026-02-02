@@ -142,13 +142,11 @@ func (s *Server) getPoliticians(electionPeriod *int, groupID *int, pageSize *int
 		return nil, 0, err
 	}
 
-	// Extract all person IDs for batch fetching
 	personIDs := make([]int, len(rolesWithFaction))
 	for i, roleWithFaction := range rolesWithFaction {
 		personIDs[i] = roleWithFaction.Role.PersonID
 	}
 
-	// Batch fetch all analytics data
 	cfactors, err := s.analyticsService.GetContributionFactor(period, personIDs)
 	if err != nil {
 		log.Printf("Failed to get contribution factors: %v", err)

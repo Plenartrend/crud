@@ -87,44 +87,55 @@ const (
 	ContributionFactorLow    ContributionFactor = "Low"
 )
 
-func getContributionFactor(factor float64) ContributionFactor {
-	if factor > 70 {
+func getContributionFactor(percentileGroup int) ContributionFactor {
+	if percentileGroup == 2 {
 		return ContributionFactorHigh
-	} else if factor > 30 {
+	} else if percentileGroup == 1 {
 		return ContributionFactorMedium
-	} else {
+	} else if percentileGroup == 0 {
 		return ContributionFactorLow
+	} else {
+		return ""
 	}
 }
 
-// TODO: Maybe instead compare to average number of activities per politician instead?
 func (s *AnalyticsService) GetContributionFactor(electionPeriod int, personIDs []int) (map[int]ContributionFactor, error) {
 	if len(personIDs) == 0 {
 		return make(map[int]ContributionFactor), nil
 	}
-
 	query := `
 		WITH contributions AS (
 			SELECT r.person_id, COUNT(*) AS cnt
 			FROM activities a
-			JOIN roles r ON r.id = a.role_id
-			JOIN protocols p ON p.id = a.protocol_id
+					JOIN roles r ON r.id = a.role_id
+					JOIN protocols p ON p.id = a.protocol_id
 			WHERE p.election_period = $1 AND a.type LIKE 'Rede%'
 			GROUP BY r.person_id
-		), max_count AS (
-			SELECT MAX(cnt) AS max_cnt FROM contributions
-		)
-		SELECT 
-			c.person_id,
-			(c.cnt::FLOAT / m.max_cnt::FLOAT) * 100 AS relative_percentage
-		FROM contributions c
-		CROSS JOIN max_count m
-		WHERE c.person_id = ANY($2)
+		),
+			percentiles AS (
+				SELECT
+					person_id,
+					cnt,
+					PERCENT_RANK() OVER (ORDER BY cnt) AS ranking
+				FROM contributions
+			)
+		SELECT
+			person_id,
+			cnt AS speech_count,
+			CASE
+				WHEN ranking > 0.66 THEN 2
+				WHEN ranking > 0.33 THEN 1
+				ELSE 0
+				END AS percentile_group
+		FROM percentiles
+		WHERE person_id = ANY($2)
+		ORDER BY speech_count DESC
 	`
 
 	type Result struct {
-		PersonID   int     `db:"person_id"`
-		Percentage float64 `db:"relative_percentage"`
+		PersonID        int `db:"person_id"`
+		SpeechCount     int `db:"speech_count"`
+		PercentileGroup int `db:"percentile_group"`
 	}
 
 	var results []Result
@@ -138,7 +149,7 @@ func (s *AnalyticsService) GetContributionFactor(electionPeriod int, personIDs [
 
 	cfactors := make(map[int]ContributionFactor)
 	for _, r := range results {
-		cfactors[r.PersonID] = getContributionFactor(r.Percentage)
+		cfactors[r.PersonID] = getContributionFactor(r.PercentileGroup)
 	}
 
 	return cfactors, nil
