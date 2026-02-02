@@ -9,7 +9,7 @@ CREATE OR REPLACE VIEW analysed_protocols AS (
     SELECT *
     FROM protocols p
     WHERE EXISTS (SELECT 1 from activities a JOIN activity_mappings am ON am.activity_id = a.id WHERE a.protocol_id = p.id)
-)
+);
 
 CREATE OR REPLACE FUNCTION get_last_x_protocols(
     _week_date DATE,

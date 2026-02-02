@@ -21,6 +21,7 @@ type Server struct {
 	topicsService      *service.TopicsService
 	helpersService     *service.HelpersService
 	partiesService     *service.PartyService
+	speechesService    *service.SpeechesService
 }
 
 func NewServer(db *sqlx.DB) *Server {
@@ -28,12 +29,14 @@ func NewServer(db *sqlx.DB) *Server {
 	topicsService := service.NewTopicsService(db, helpersService)
 	partiesService := service.NewPartyService(db, topicsService)
 	politiciansService := service.NewPoliticiansService(db, topicsService, helpersService)
+	speechesService := service.NewSpeechesService(db)
 	return &Server{
 		db:                 db,
 		politiciansService: politiciansService,
 		topicsService:      topicsService,
 		helpersService:     helpersService,
 		partiesService:     partiesService,
+		speechesService:    speechesService,
 	}
 }
 
@@ -198,7 +201,7 @@ func (s *Server) GetPoliticiansIdActivity(w http.ResponseWriter, r *http.Request
 
 func (s *Server) GetPoliticiansIdWordcloud(w http.ResponseWriter, r *http.Request, id string) {
 	log.Printf("GetPoliticiansIdWordcloud called with id=%s", id)
-	
+
 	personID, err := strconv.Atoi(id)
 	if err != nil {
 		log.Printf("Failed to convert ID to int: %v", err)
@@ -311,83 +314,6 @@ func (s *Server) GetSearch(w http.ResponseWriter, r *http.Request, params api.Ge
 	_ = json.NewEncoder(w).Encode(searchResults)
 }
 
-func (s *Server) getSpeeches(id *int) ([]api.FullSpeech, error) {
-	speeches := []api.FullSpeech{}
-
-	idSelector := ""
-
-	if id != nil {
-		idSelector = " AND a.id = " + strconv.Itoa(*id)
-	}
-
-	// TODO we don't have a lot of this data
-	err := s.db.Select(&speeches, `
-		SELECT
-			a.text as content,
-			p.date as date,
-			null as duration,
-			a.id as id,
-			null as relatedTopics,
-			null as sentiment,
-			null as session,
-			p.url as sourceUrl,
-			a.role_id as speakerId,
-			null as title,
-			null as topicId,
-			a.type as type
-		FROM activities a, protocols p
-		WHERE a.protocol_id = p.id
-			AND a.type LIKE 'Rede%'
-			`+idSelector+`
-	`)
-
-	return speeches, err
-}
-
-func (s *Server) GetSpeeches(w http.ResponseWriter, r *http.Request) {
-	speeches := []api.FullSpeech{}
-
-	speeches, err := s.getSpeeches(nil)
-
-	if err != nil {
-		log.Printf("Failed to query speeches: %v", err)
-		http.Error(w, "Failed to query speeches", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(speeches)
-}
-
-func (s *Server) GetSpeechesId(w http.ResponseWriter, r *http.Request, id string) {
-	speechID, err := strconv.Atoi(id)
-
-	if err != nil {
-		log.Printf("Invalid speech ID: %v", err)
-		http.Error(w, "Invalid speech ID", http.StatusBadRequest)
-		return
-	}
-
-	speeches, err := s.getSpeeches(&speechID)
-
-	if err != nil {
-		log.Printf("Failed to query speech: %v", err)
-		http.Error(w, "Failed to query speech", http.StatusInternalServerError)
-		return
-	}
-
-	if len(speeches) == 0 {
-		log.Printf("Speech not found: %v", speechID)
-		http.Error(w, "Speech not found", http.StatusNotFound)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(speeches[0])
-}
-
 func (s *Server) getTopics(id *int) ([]api.Topic, error) {
 	topics := []api.Topic{}
 	idSelector := ""
@@ -406,6 +332,64 @@ func (s *Server) getTopics(id *int) ([]api.Topic, error) {
 		`+idSelector+`
 	`)
 	return topics, err
+}
+
+func (s *Server) GetSpeeches(w http.ResponseWriter, r *http.Request, params api.GetSpeechesParams) {
+	log.Printf("GetSpeeches called with params: %+v", params)
+
+	offset := 0
+	if params.Offset != nil {
+		offset = *params.Offset
+	}
+	limit := 20
+	if params.PageSize != nil {
+		limit = *params.PageSize
+	}
+
+	speeches, totalCount, err := s.speechesService.GetSpeeches(limit, offset)
+	if err != nil {
+		log.Printf("Failed to query speeches: %v", err)
+		http.Error(w, "Failed to query speeches", http.StatusInternalServerError)
+		return
+	}
+
+	page := 1
+	if limit > 0 {
+		page = (offset / limit) + 1
+	}
+
+	response := api.PaginatedSpeeches{
+		Data:       speeches,
+		TotalItems: totalCount,
+		Page:       page,
+		PageSize:   limit,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+func (s *Server) GetSpeechesId(w http.ResponseWriter, r *http.Request, id string) {
+	speechID, err := strconv.Atoi(id)
+
+	if err != nil {
+		log.Printf("Invalid speech ID: %v", err)
+		http.Error(w, "Invalid speech ID", http.StatusBadRequest)
+		return
+	}
+
+	speech, err := s.speechesService.GetSpeechById(speechID)
+
+	if err != nil {
+		log.Printf("Failed to query speech: %v", err)
+		http.Error(w, "Failed to query speech", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(speech)
 }
 
 func (s *Server) GetTopics(w http.ResponseWriter, r *http.Request, params api.GetTopicsParams) {

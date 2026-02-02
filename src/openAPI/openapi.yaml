@@ -298,16 +298,17 @@ paths:
   /speeches:
     get:
       summary: List all speeches
-      description: Retrieves a list of full speeches metadata.
+      description: Retrieves a paginated list of speeches with lightweight metadata.
+      parameters:
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: A list of speeches.
+          description: Paginated list of speeches.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/FullSpeech'
+                $ref: '#/components/schemas/PaginatedSpeeches'
 
   /speeches/{id}:
     get:
@@ -677,6 +678,28 @@ components:
           minimum: 1
           description: Number of items per page.
 
+    PaginatedSpeeches:
+      type: object
+      description: Paginated response containing a page of speeches and pagination metadata.
+      required: [data, total_items, page, page_size]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Speech'
+          description: Page of speeches.
+        total_items:
+          type: integer
+          description: Total number of speeches across all pages.
+        page:
+          type: integer
+          minimum: 1
+          description: Current page (1-based).
+        page_size:
+          type: integer
+          minimum: 1
+          description: Number of items per page.
+
     ParliamentaryGroup:
       type: object
       properties:
@@ -808,6 +831,8 @@ components:
           type: string
         session:
           type: string
+        publisher:
+          type: string
         topicId:
           type: string
         relatedTopics:
@@ -818,9 +843,37 @@ components:
           type: string
         sentiment:
           type: string
-          enum: ["stark positiv", "positiv", "neutral", "negativ", "stark negativ"]
+          enum: ["stark positiv", "positiv", "neutral", "negativ", "stark negativ", "unbekannt"]
         sourceUrl:
           type: string
+
+    Speech:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        title:
+          type: string
+        date:
+          type: string
+          format: date-time
+        speaker:
+          $ref: '#/components/schemas/PoliticianRef'
+        topic:
+          $ref: '#/components/schemas/TopicRef'
+        session:
+          type: string
+        publisher:
+          type: string
+
+      required:
+        - id
+        - type
+        - title
+        - date
+        - speaker
 
     PoliticianDetail:
       allOf:
@@ -875,15 +928,45 @@ components:
           type: string
           format: date-time
 
+    PoliticianRef:
+      type: object
+      properties:
+        id:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        party:
+          type: string
+      required:
+        - id
+        - firstName
+        - lastName
+        - party
+
+    TopicRef:
+      type: object
+      properties:
+        id:
+          type: string
+        category:
+          type: string
+      required:
+        - id
+        - category
+
     SpeechDetail:
       allOf:
         - $ref: '#/components/schemas/FullSpeech'
         - type: object
           properties:
             speaker:
-              $ref: '#/components/schemas/Politician'
+              $ref: '#/components/schemas/PoliticianRef'
             topic:
-              $ref: '#/components/schemas/Topic'
+              $ref: '#/components/schemas/TopicRef'
+            reason:
+              type: string
 
     NotificationDetails:
       type: object

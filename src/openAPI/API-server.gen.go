@@ -28,6 +28,7 @@ const (
 	FullSpeechSentimentPositiv      FullSpeechSentiment = "positiv"
 	FullSpeechSentimentStarkNegativ FullSpeechSentiment = "stark negativ"
 	FullSpeechSentimentStarkPositiv FullSpeechSentiment = "stark positiv"
+	FullSpeechSentimentUnbekannt    FullSpeechSentiment = "unbekannt"
 )
 
 // Defines values for PartyContributionFactor.
@@ -65,6 +66,7 @@ const (
 	SpeechDetailSentimentPositiv      SpeechDetailSentiment = "positiv"
 	SpeechDetailSentimentStarkNegativ SpeechDetailSentiment = "stark negativ"
 	SpeechDetailSentimentStarkPositiv SpeechDetailSentiment = "stark positiv"
+	SpeechDetailSentimentUnbekannt    SpeechDetailSentiment = "unbekannt"
 )
 
 // Defines values for SpeechSnippetSentiment.
@@ -184,6 +186,7 @@ type FullSpeech struct {
 	Date          *time.Time           `json:"date,omitempty"`
 	Duration      *string              `json:"duration,omitempty"`
 	Id            *string              `json:"id,omitempty"`
+	Publisher     *string              `json:"publisher,omitempty"`
 	RelatedTopics *[]string            `json:"relatedTopics,omitempty"`
 	Sentiment     *FullSpeechSentiment `json:"sentiment,omitempty"`
 	Session       *string              `json:"session,omitempty"`
@@ -218,6 +221,21 @@ type PaginatedPoliticians struct {
 	PageSize int `json:"page_size"`
 
 	// TotalItems Total number of politicians across all pages.
+	TotalItems int `json:"total_items"`
+}
+
+// PaginatedSpeeches Paginated response containing a page of speeches and pagination metadata.
+type PaginatedSpeeches struct {
+	// Data Page of speeches.
+	Data []Speech `json:"data"`
+
+	// Page Current page (1-based).
+	Page int `json:"page"`
+
+	// PageSize Number of items per page.
+	PageSize int `json:"page_size"`
+
+	// TotalItems Total number of speeches across all pages.
 	TotalItems int `json:"total_items"`
 }
 
@@ -346,6 +364,14 @@ type PoliticianDetail struct {
 // PoliticianDetailContributionFactor Contribution factor level
 type PoliticianDetailContributionFactor string
 
+// PoliticianRef defines model for PoliticianRef.
+type PoliticianRef struct {
+	FirstName string `json:"firstName"`
+	Id        string `json:"id"`
+	LastName  string `json:"lastName"`
+	Party     string `json:"party"`
+}
+
 // PrintedPaper defines model for PrintedPaper.
 type PrintedPaper struct {
 	Date *time.Time `json:"date,omitempty"`
@@ -385,20 +411,34 @@ type SessionStatus struct {
 	Wahlperiode    *int       `json:"wahlperiode,omitempty"`
 }
 
+// Speech defines model for Speech.
+type Speech struct {
+	Date      time.Time     `json:"date"`
+	Id        string        `json:"id"`
+	Publisher *string       `json:"publisher,omitempty"`
+	Session   *string       `json:"session,omitempty"`
+	Speaker   PoliticianRef `json:"speaker"`
+	Title     string        `json:"title"`
+	Topic     *TopicRef     `json:"topic,omitempty"`
+	Type      string        `json:"type"`
+}
+
 // SpeechDetail defines model for SpeechDetail.
 type SpeechDetail struct {
 	Content       *string                `json:"content,omitempty"`
 	Date          *time.Time             `json:"date,omitempty"`
 	Duration      *string                `json:"duration,omitempty"`
 	Id            *string                `json:"id,omitempty"`
+	Publisher     *string                `json:"publisher,omitempty"`
+	Reason        *string                `json:"reason,omitempty"`
 	RelatedTopics *[]string              `json:"relatedTopics,omitempty"`
 	Sentiment     *SpeechDetailSentiment `json:"sentiment,omitempty"`
 	Session       *string                `json:"session,omitempty"`
 	SourceUrl     *string                `json:"sourceUrl,omitempty"`
-	Speaker       *Politician            `json:"speaker,omitempty"`
+	Speaker       *PoliticianRef         `json:"speaker,omitempty"`
 	SpeakerId     *string                `json:"speakerId,omitempty"`
 	Title         *string                `json:"title,omitempty"`
-	Topic         *Topic                 `json:"topic,omitempty"`
+	Topic         *TopicRef              `json:"topic,omitempty"`
 	TopicId       *string                `json:"topicId,omitempty"`
 	Type          *string                `json:"type,omitempty"`
 }
@@ -483,6 +523,12 @@ type TopicDetail struct {
 
 // TopicDetailTrend defines model for TopicDetail.Trend.
 type TopicDetailTrend string
+
+// TopicRef defines model for TopicRef.
+type TopicRef struct {
+	Category string `json:"category"`
+	Id       string `json:"id"`
+}
 
 // TrendDataPoint defines model for TrendDataPoint.
 type TrendDataPoint struct {
@@ -604,6 +650,15 @@ type GetSearchParams struct {
 	Q *string `form:"q,omitempty" json:"q,omitempty"`
 }
 
+// GetSpeechesParams defines parameters for GetSpeeches.
+type GetSpeechesParams struct {
+	// PageSize Number of items per page. If not provided, all items are returned. Maximum is 100.
+	PageSize *PageSize `form:"page_size,omitempty" json:"page_size,omitempty"`
+
+	// Offset Number of items to skip (for pagination). Default is 0.
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // GetTopicsParams defines parameters for GetTopics.
 type GetTopicsParams struct {
 	// PageSize Number of items per page. If not provided, all items are returned. Maximum is 100.
@@ -671,7 +726,7 @@ type ServerInterface interface {
 	GetSearch(w http.ResponseWriter, r *http.Request, params GetSearchParams)
 	// List all speeches
 	// (GET /speeches)
-	GetSpeeches(w http.ResponseWriter, r *http.Request)
+	GetSpeeches(w http.ResponseWriter, r *http.Request, params GetSpeechesParams)
 	// Get a specific speech
 	// (GET /speeches/{id})
 	GetSpeechesId(w http.ResponseWriter, r *http.Request, id string)
@@ -1287,8 +1342,29 @@ func (siw *ServerInterfaceWrapper) GetSearch(w http.ResponseWriter, r *http.Requ
 // GetSpeeches operation middleware
 func (siw *ServerInterfaceWrapper) GetSpeeches(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetSpeechesParams
+
+	// ------------- Optional query parameter "page_size" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "page_size", r.URL.Query(), &params.PageSize)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_size", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "offset", r.URL.Query(), &params.Offset)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetSpeeches(w, r)
+		siw.Handler.GetSpeeches(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
