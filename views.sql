@@ -438,25 +438,29 @@ $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION get_volatility_for_election_period(
     _election_period INT,
-    _person_id INT DEFAULT NULL,
+    _person_ids INT[] DEFAULT NULL,
     _group_id INT DEFAULT NULL,
     _topic_id INT DEFAULT NULL
 )
     RETURNS TABLE (
+                      person_id INT,
                       volatility FLOAT
                   )
 AS $$
-WITH std_dev_per_topic AS (
-    SELECT am.topic_id, stddev_pop(am.sentiment_value) as std_dev
-    FROM activity_mappings am JOIN activities a ON a.id = am.activity_id
-                              JOIN roles r ON r.id = a.role_id JOIN protocols p ON p.id = a.protocol_id
+WITH std_dev_per_person_topic AS (
+    SELECT r.person_id, am.topic_id, stddev_pop(am.sentiment_value) as std_dev
+    FROM activity_mappings am 
+    JOIN activities a ON a.id = am.activity_id
+    JOIN roles r ON r.id = a.role_id 
+    JOIN protocols p ON p.id = a.protocol_id
     WHERE p.election_period = _election_period
-      AND (_person_id IS NULL OR r.person_id = _person_id)
+      AND (_person_ids IS NULL OR r.person_id = ANY(_person_ids))
       AND (_group_id IS NULL OR r.group_id = _group_id)
       AND (_topic_id IS NULL OR am.topic_id = _topic_id)
-    GROUP BY am.topic_id
+    GROUP BY r.person_id, am.topic_id
     HAVING COUNT(*) > 1
 )
-SELECT COALESCE(AVG(std_dev), 0.0) as volatility
-FROM std_dev_per_topic;
+SELECT sppt.person_id, COALESCE(AVG(sppt.std_dev), 0.0) as volatility
+FROM std_dev_per_person_topic sppt
+GROUP BY sppt.person_id;
 $$ LANGUAGE SQL STABLE;

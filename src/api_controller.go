@@ -83,7 +83,7 @@ func (s *Server) getPoliticians(electionPeriod *int, groupID *int, pageSize int,
 	log.Printf("Getting politicians for election period: %d, groupID: %v, pageSize: %d, offset: %d", electionPeriod, groupID, pageSize, offset)
 
 	// Default to latest election period if not specified
-	period := 21
+	period := 21 //TODO: Fetch
 	if electionPeriod != nil {
 		period = *electionPeriod
 	}
@@ -142,42 +142,55 @@ func (s *Server) getPoliticians(electionPeriod *int, groupID *int, pageSize int,
 		return nil, 0, err
 	}
 
+	// Extract all person IDs for batch fetching
+	personIDs := make([]int, len(rolesWithFaction))
+	for i, roleWithFaction := range rolesWithFaction {
+		personIDs[i] = roleWithFaction.Role.PersonID
+	}
+
+	// Batch fetch all analytics data
+	cfactors, err := s.analyticsService.GetContributionFactor(period, personIDs)
+	if err != nil {
+		log.Printf("Failed to get contribution factors: %v", err)
+		cfactors = make(map[int]service.ContributionFactor)
+	}
+
+	volatilities, err := s.analyticsService.GetVolatility(period, personIDs)
+	if err != nil {
+		log.Printf("Failed to get volatilities: %v", err)
+		volatilities = make(map[int]float64)
+	}
+
+	topTopicsMap, err := s.analyticsService.GetTopTopics(period, personIDs, 3)
+	if err != nil {
+		log.Printf("Failed to get top topics: %v", err)
+		topTopicsMap = make(map[int][]types.Topic)
+	}
+
+	speechCounts, err := s.analyticsService.GetNumberOfSpeeches(period, personIDs)
+	if err != nil {
+		log.Printf("Failed to get speech counts: %v", err)
+		speechCounts = make(map[int]int)
+	}
+
 	// Convert roles to politicians with analytics data
 	for _, roleWithFaction := range rolesWithFaction {
 		role := roleWithFaction.Role
-		cfactor, err := s.analyticsService.GetContributionFactor(period, role.PersonID)
-		if err != nil {
-			log.Printf("Failed to get contribution factor: %v", err)
+		personID := role.PersonID
+
+		// Get analytics data from maps with defaults
+		cfactor := cfactors[personID]
+		if cfactor == "" {
 			cfactor = "low"
 		}
 
-		volatility, err := s.analyticsService.GetVolatility(period, role.PersonID)
-		if err != nil {
-			log.Printf("Failed to get volatility: %v", err)
-			volatility = 0
-		}
-
-		// Get top topics
-		topTopics, err := s.analyticsService.GetTopTopics(period, role.PersonID, 3)
-		if err != nil {
-			log.Printf("Failed to get top topics for person %d: %v", role.PersonID, err)
+		volatility := volatilities[personID]
+		topTopics := topTopicsMap[personID]
+		if topTopics == nil {
 			topTopics = []types.Topic{}
 		}
 
-		// Get number of speeches for this person
-		var numSpeeches int
-		speechQuery := `
-			SELECT COUNT(*) 
-			FROM activities a 
-			JOIN protocols p ON p.id = a.protocol_id
-			WHERE p.election_period = ? AND a.type LIKE 'Rede%' 
-			AND a.role_id IN (SELECT id FROM roles WHERE person_id = ?)
-		`
-		err = s.db.Get(&numSpeeches, s.db.Rebind(speechQuery), period, role.PersonID)
-		if err != nil {
-			log.Printf("Failed to get number of speeches for person %d: %v", role.PersonID, err)
-			numSpeeches = 0
-		}
+		numSpeeches := speechCounts[personID]
 
 		// Convert to API types (pointers)
 		idStr := strconv.Itoa(role.PersonID)
@@ -309,17 +322,25 @@ func (s *Server) GetPoliticiansId(w http.ResponseWriter, r *http.Request, id str
 
 	role := roleWithFaction.Role
 
-	contributionFactor, err := s.analyticsService.GetContributionFactor(period, role.PersonID)
+	// Use batch methods with single ID
+	personIDs := []int{role.PersonID}
+
+	cfactors, err := s.analyticsService.GetContributionFactor(period, personIDs)
 	if err != nil {
 		log.Printf("Failed to get contribution factor: %v", err)
+		cfactors = make(map[int]service.ContributionFactor)
+	}
+	contributionFactor := cfactors[role.PersonID]
+	if contributionFactor == "" {
 		contributionFactor = "low"
 	}
 
-	volatility, err := s.analyticsService.GetVolatility(period, role.PersonID)
+	volatilities, err := s.analyticsService.GetVolatility(period, personIDs)
 	if err != nil {
 		log.Printf("Failed to get volatility: %v", err)
-		volatility = 0
+		volatilities = make(map[int]float64)
 	}
+	volatility := volatilities[role.PersonID]
 
 	// Convert to API types (pointers)
 	idStr := strconv.Itoa(role.PersonID)
@@ -364,7 +385,7 @@ func (s *Server) GetElectionPeriods(w http.ResponseWriter, r *http.Request) {
 	log.Printf("GetElectionPeriods called")
 
 	var periods []types.ElectionPeriod
-	err := s.db.Select(&periods, "SELECT DISTINCT ep.* FROM analysed_protocols ap JOIN election_periods ep ON ap.election_period = ep.number")
+	err := s.db.Select(&periods, "SELECT DISTINCT ep.* FROM analysed_protocols ap JOIN election_periods ep ON ap.election_period = ep.number ORDER BY ep.number DESC")
 	if err != nil {
 		log.Printf("Failed to query election periods: %v", err)
 		http.Error(w, "Failed to query election periods", http.StatusInternalServerError)

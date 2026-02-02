@@ -2,7 +2,6 @@ package service
 
 import (
 	"database/sql"
-	"errors"
 	"log"
 	api "plenartrend/crud/src/openAPI"
 	"plenartrend/crud/src/types"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
@@ -98,7 +98,11 @@ func getContributionFactor(factor float64) ContributionFactor {
 }
 
 // TODO: Maybe instead compare to average number of activities per politician instead?
-func (s *AnalyticsService) GetContributionFactor(electionPeriod int, personID int) (ContributionFactor, error) {
+func (s *AnalyticsService) GetContributionFactor(electionPeriod int, personIDs []int) (map[int]ContributionFactor, error) {
+	if len(personIDs) == 0 {
+		return make(map[int]ContributionFactor), nil
+	}
+
 	query := `
 		WITH contributions AS (
 			SELECT r.person_id, COUNT(*) AS cnt
@@ -111,81 +115,148 @@ func (s *AnalyticsService) GetContributionFactor(electionPeriod int, personID in
 			SELECT MAX(cnt) AS max_cnt FROM contributions
 		)
 		SELECT 
+			c.person_id,
 			(c.cnt::FLOAT / m.max_cnt::FLOAT) * 100 AS relative_percentage
 		FROM contributions c
 		CROSS JOIN max_count m
-		WHERE c.person_id = $2
-		LIMIT 1
-    `
-	var contributionFactor float64
-	err := s.db.Get(&contributionFactor, query, electionPeriod, personID)
-	if err != nil {
-		log.Printf("Failed to get contribution factor: %v", err)
-		return ContributionFactorLow, err
+		WHERE c.person_id = ANY($2)
+	`
+
+	type Result struct {
+		PersonID   int     `db:"person_id"`
+		Percentage float64 `db:"relative_percentage"`
 	}
-	return getContributionFactor(contributionFactor), nil
+
+	var results []Result
+	err := s.db.Select(&results, query, electionPeriod, pq.Array(personIDs))
+	if err != nil {
+		log.Printf("Failed to get contribution factors: %v", err)
+		return nil, err
+	}
+
+	log.Printf("Got %d contribution factor results for %d person IDs", len(results), len(personIDs))
+
+	cfactors := make(map[int]ContributionFactor)
+	for _, r := range results {
+		cfactors[r.PersonID] = getContributionFactor(r.Percentage)
+	}
+
+	return cfactors, nil
 }
 
-func (s *AnalyticsService) GetVolatility(electionPeriod int, personID int) (float64, error) {
-	query := `
-	   SELECT * FROM get_volatility_for_election_period($1, $2, $3, $4)
-	`
-	var volatility sql.NullFloat64
-	err := s.db.Get(&volatility, query, electionPeriod, personID, nil, nil)
+func (s *AnalyticsService) GetVolatility(electionPeriod int, personIDs []int) (map[int]float64, error) {
+	if len(personIDs) == 0 {
+		return make(map[int]float64), nil
+	}
+
+	query := `SELECT * FROM get_volatility_for_election_period($1, $2, $3, $4)`
+
+	type Result struct {
+		PersonID   int     `db:"person_id"`
+		Volatility float64 `db:"volatility"`
+	}
+
+	var results []Result
+	err := s.db.Select(&results, query, electionPeriod, pq.Array(personIDs), nil, nil)
 	if err != nil {
-		// If there are no rows, treat as 0.0
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0.0, nil
-		}
-		log.Printf("Failed to get volatility: %v", err)
-		return 0, err
+		log.Printf("Failed to get volatilities: %v", err)
+		return nil, err
 	}
-	if !volatility.Valid {
-		return 0, nil
+
+	log.Printf("Got %d volatility results for %d person IDs", len(results), len(personIDs))
+
+	volatilities := make(map[int]float64)
+	for _, r := range results {
+		volatilities[r.PersonID] = r.Volatility
 	}
-	return volatility.Float64, nil
+
+	return volatilities, nil
 }
 
 // TODO: Maybe only show speeches we actually analyzed?
-func (s *AnalyticsService) GetNumberOfSpeeches(electionPeriod int, personId int) (int, error) {
-	query := `
-	   SELECT COUNT(*) as number_of_speeches FROM activities a JOIN protocols p ON p.id = a.protocol_id JOIN activity_mappings am ON am.activity_id = a.id
-	   WHERE p.election_period = $1 AND a.type LIKE 'Rede%' AND a.role_id IN (SELECT id FROM roles WHERE person_id = $2)
-	`
-	var numOfSpeeches int
-	err := s.db.Get(&numOfSpeeches, query, electionPeriod, personId)
-	if err != nil {
-		log.Printf("Failed to get number of speeches: %v", err)
-		return 0, err
+func (s *AnalyticsService) GetNumberOfSpeeches(electionPeriod int, personIDs []int) (map[int]int, error) {
+	if len(personIDs) == 0 {
+		return make(map[int]int), nil
 	}
-	return numOfSpeeches, nil
+
+	query := `
+		SELECT r.person_id, COUNT(*) as count
+		FROM activities a
+		JOIN protocols p ON p.id = a.protocol_id
+		JOIN roles r ON r.id = a.role_id
+		WHERE p.election_period = $1 
+		AND a.type LIKE 'Rede%'
+		AND r.person_id = ANY($2)
+		GROUP BY r.person_id
+	`
+
+	type Result struct {
+		PersonID int `db:"person_id"`
+		Count    int `db:"count"`
+	}
+
+	var results []Result
+	err := s.db.Select(&results, query, electionPeriod, pq.Array(personIDs))
+	if err != nil {
+		log.Printf("Failed to get speech counts: %v", err)
+		return nil, err
+	}
+
+	log.Printf("Got %d speech count results for %d person IDs", len(results), len(personIDs))
+
+	counts := make(map[int]int)
+	for _, r := range results {
+		counts[r.PersonID] = r.Count
+	}
+
+	return counts, nil
 }
 
-func (s *AnalyticsService) GetTopTopics(electionPeriod int, personID int, numOfTopics int) ([]types.Topic, error) {
-	log.Printf("Getting top topics for person %d in election period %d", personID, electionPeriod)
+func (s *AnalyticsService) GetTopTopics(electionPeriod int, personIDs []int, numOfTopics int) (map[int][]types.Topic, error) {
+	if len(personIDs) == 0 {
+		return make(map[int][]types.Topic), nil
+	}
+
+	log.Printf("Getting top topics for %d persons in election period %d", len(personIDs), electionPeriod)
 	query := `
 		WITH top_topics AS (
-			SELECT am.topic_id, COUNT(*) AS activity_count
+			SELECT r.person_id, am.topic_id, COUNT(*) AS activity_count,
+				   ROW_NUMBER() OVER (PARTITION BY r.person_id ORDER BY COUNT(*) DESC) as rn
 			FROM activity_mappings am
-					JOIN activities a ON a.id = am.activity_id
-					JOIN roles r ON r.id = a.role_id JOIN protocols p ON p.id = a.protocol_id
-			WHERE r.person_id = $1 AND p.election_period = $2
-			GROUP BY am.topic_id 
-			ORDER BY activity_count DESC
-			LIMIT $3
+			JOIN activities a ON a.id = am.activity_id
+			JOIN roles r ON r.id = a.role_id
+			JOIN protocols p ON p.id = a.protocol_id
+			WHERE r.person_id = ANY($1) AND p.election_period = $2
+			GROUP BY r.person_id, am.topic_id
 		)
-		SELECT t.id, t.name, t.updated, t.created
-		FROM topics t
-				JOIN top_topics tt ON t.id = tt.topic_id;
+		SELECT tt.person_id, t.id, t.name, t.updated, t.created
+		FROM top_topics tt
+		JOIN topics t ON t.id = tt.topic_id
+		WHERE tt.rn <= $3
+		ORDER BY tt.person_id, tt.rn
 	`
-	var topTopics []types.Topic
-	err := s.db.Select(&topTopics, query, personID, electionPeriod, numOfTopics)
+
+	type Result struct {
+		PersonID int `db:"person_id"`
+		types.Topic
+	}
+
+	var results []Result
+	err := s.db.Select(&results, query, pq.Array(personIDs), electionPeriod, numOfTopics)
 	if err != nil {
 		log.Printf("Failed to get top topics: %v", err)
 		return nil, err
 	}
-	log.Printf("Found %d top topics for person %d in election period %d", len(topTopics), personID, electionPeriod)
-	return topTopics, nil
+
+	log.Printf("Got %d top topic results for %d person IDs", len(results), len(personIDs))
+
+	topicsMap := make(map[int][]types.Topic)
+	for _, r := range results {
+		topicsMap[r.PersonID] = append(topicsMap[r.PersonID], r.Topic)
+	}
+
+	log.Printf("Found top topics for %d persons", len(topicsMap))
+	return topicsMap, nil
 }
 
 func (s *AnalyticsService) getFirstAndLastAnalyzedDate() (time.Time, time.Time, error) {
