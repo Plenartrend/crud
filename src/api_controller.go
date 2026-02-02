@@ -196,6 +196,28 @@ func (s *Server) GetPoliticiansIdActivity(w http.ResponseWriter, r *http.Request
 	_ = json.NewEncoder(w).Encode(activityData)
 }
 
+func (s *Server) GetPoliticiansIdWordcloud(w http.ResponseWriter, r *http.Request, id string) {
+	log.Printf("GetPoliticiansIdWordcloud called with id=%s", id)
+	
+	personID, err := strconv.Atoi(id)
+	if err != nil {
+		log.Printf("Failed to convert ID to int: %v", err)
+		http.Error(w, "Failed to convert ID to int", http.StatusBadRequest)
+		return
+	}
+
+	wordcloud, err := s.politiciansService.GetPoliticianWordcloud(personID)
+	if err != nil {
+		log.Printf("Failed to get politician wordcloud: %v", err)
+		http.Error(w, "Failed to get politician wordcloud", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(wordcloud)
+}
+
 func (s *Server) GetElectionPeriods(w http.ResponseWriter, r *http.Request) {
 	log.Printf("GetElectionPeriods called")
 

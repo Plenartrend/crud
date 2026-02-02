@@ -2,10 +2,12 @@ package service
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	api "plenartrend/crud/src/openAPI"
 	"plenartrend/crud/src/types"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -359,6 +361,61 @@ func (s *PoliticiansService) GetSimilarPoliticians(personID int, electionPeriod 
 	}
 
 	return similar, nil
+}
+
+type TfidfEntry struct {
+	DocID int     `json:"doc_id"`
+	Term  string  `json:"term"`
+	Tfidf float64 `json:"tfidf"`
+}
+
+func (s *PoliticiansService) GetPoliticianWordcloud(personID int) ([]api.WordCloudItem, error) {
+	query := `
+		SELECT tfidf_vector
+		FROM activity_tfidf
+		WHERE person_id = $1
+	`
+
+	var tfidfVectorJSON string
+	err := s.db.Get(&tfidfVectorJSON, query, personID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Printf("No tfidf data found for person_id %d", personID)
+			return []api.WordCloudItem{}, nil
+		}
+		log.Printf("Failed to query tfidf_vector: %v", err)
+		return nil, err
+	}
+
+	// Parse JSON array
+	var tfidfEntries []TfidfEntry
+	err = json.Unmarshal([]byte(tfidfVectorJSON), &tfidfEntries)
+	if err != nil {
+		log.Printf("Failed to parse tfidf_vector JSON: %v", err)
+		return nil, err
+	}
+
+	// Sort by tfidf value (descending)
+	sort.Slice(tfidfEntries, func(i, j int) bool {
+		return tfidfEntries[i].Tfidf > tfidfEntries[j].Tfidf
+	})
+
+	// Take top 10
+	maxItems := 10
+	if len(tfidfEntries) < maxItems {
+		maxItems = len(tfidfEntries)
+	}
+
+	wordcloudItems := make([]api.WordCloudItem, 0, maxItems)
+	for i := 0; i < maxItems; i++ {
+		entry := tfidfEntries[i]
+		wordcloudItems = append(wordcloudItems, api.WordCloudItem{
+			Word:   entry.Term,
+			Weight: float32(entry.Tfidf),
+		})
+	}
+
+	return wordcloudItems, nil
 }
 
 func contributionFactorToEnum(cfactor string) api.PoliticianContributionFactor {

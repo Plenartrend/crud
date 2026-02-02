@@ -176,6 +176,30 @@ paths:
         '404':
           description: Politician not found.
 
+  /politicians/{id}/wordcloud:
+    get:
+      summary: Get politician wordcloud
+      description: Retrieves the top 10 most frequently used words by a politician with their weights.
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: The ID of the politician.
+      responses:
+        '200':
+          description: Wordcloud data with top 10 words and their weights.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WordCloudItem'
+                maxItems: 10
+        '404':
+          description: Politician not found.
+
   /politicians/most-active:
     get:
       summary: Get most active politicians
@@ -548,6 +572,20 @@ components:
           type: string
         value:
           type: number
+
+    WordCloudItem:
+      type: object
+      properties:
+        word:
+          type: string
+          description: The word from the politician's speeches.
+        weight:
+          type: number
+          format: float
+          description: The weight/frequency of the word.
+      required:
+        - word
+        - weight
 
     SpeechSnippet:
       type: object

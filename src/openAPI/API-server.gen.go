@@ -490,6 +490,15 @@ type TrendDataPoint struct {
 	Value *float32 `json:"value,omitempty"`
 }
 
+// WordCloudItem defines model for WordCloudItem.
+type WordCloudItem struct {
+	// Weight The weight/frequency of the word.
+	Weight float32 `json:"weight"`
+
+	// Word The word from the politician's speeches.
+	Word string `json:"word"`
+}
+
 // ElectionPeriodFilter defines model for ElectionPeriodFilter.
 type ElectionPeriodFilter = int
 
@@ -651,6 +660,9 @@ type ServerInterface interface {
 	// Get similar politicians
 	// (GET /politicians/{id}/similar)
 	GetPoliticiansIdSimilar(w http.ResponseWriter, r *http.Request, id string, params GetPoliticiansIdSimilarParams)
+	// Get politician wordcloud
+	// (GET /politicians/{id}/wordcloud)
+	GetPoliticiansIdWordcloud(w http.ResponseWriter, r *http.Request, id string)
 	// List all reports
 	// (GET /reports)
 	GetReports(w http.ResponseWriter, r *http.Request)
@@ -1206,6 +1218,31 @@ func (siw *ServerInterfaceWrapper) GetPoliticiansIdSimilar(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
+// GetPoliticiansIdWordcloud operation middleware
+func (siw *ServerInterfaceWrapper) GetPoliticiansIdWordcloud(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPoliticiansIdWordcloud(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetReports operation middleware
 func (siw *ServerInterfaceWrapper) GetReports(w http.ResponseWriter, r *http.Request) {
 
@@ -1481,6 +1518,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/politicians/{id}", wrapper.GetPoliticiansId)
 	m.HandleFunc("GET "+options.BaseURL+"/politicians/{id}/activity", wrapper.GetPoliticiansIdActivity)
 	m.HandleFunc("GET "+options.BaseURL+"/politicians/{id}/similar", wrapper.GetPoliticiansIdSimilar)
+	m.HandleFunc("GET "+options.BaseURL+"/politicians/{id}/wordcloud", wrapper.GetPoliticiansIdWordcloud)
 	m.HandleFunc("GET "+options.BaseURL+"/reports", wrapper.GetReports)
 	m.HandleFunc("GET "+options.BaseURL+"/search", wrapper.GetSearch)
 	m.HandleFunc("GET "+options.BaseURL+"/speeches", wrapper.GetSpeeches)
