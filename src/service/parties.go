@@ -30,7 +30,45 @@ func (p *PartyService) GetNumSpeechesParty(partyID int, electionPeriod int) (int
 }
 
 func (p *PartyService) GetTopTopicsForParty(partyID int, numTopics int) ([]api.TopTopic, error) {
-	return []api.TopTopic{}, nil
+	// Retrieve some placeholder data
+
+	sentiment := float32(-1.0)
+	speechCount := 42
+	stance := "Pro"
+	topic := "Umwelt"
+
+	return []api.TopTopic{
+		{
+			Sentiment:   &sentiment,
+			SpeechCount: &speechCount,
+			Stance:      &stance,
+			Topic:       &topic,
+		},
+		{
+			Sentiment:   &sentiment,
+			SpeechCount: &speechCount,
+			Stance:      &stance,
+			Topic:       &topic,
+		},
+		{
+			Sentiment:   &sentiment,
+			SpeechCount: &speechCount,
+			Stance:      &stance,
+			Topic:       &topic,
+		},
+		{
+			Sentiment:   &sentiment,
+			SpeechCount: &speechCount,
+			Stance:      &stance,
+			Topic:       &topic,
+		},
+		{
+			Sentiment:   &sentiment,
+			SpeechCount: &speechCount,
+			Stance:      &stance,
+			Topic:       &topic,
+		},
+	}, nil
 }
 
 func (p *PartyService) GetPartyVolatility(partyID int) (string, error) {
@@ -46,12 +84,12 @@ func (p *PartyService) GetParties(electionPeriod int) ([]api.Party, error) {
 			WHERE group_id = parliamentary_groups.id
 			AND election_period = $1
 		)
-	`)
+	`, electionPeriod)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to query parliamentary groups: %v", err)
 	}
 
-	apiParties := make([]api.Party, 0, len(parties))
+	apiParties := make([]api.Party, len(parties))
 
 	for i, party := range parties {
 		contributionFactorStr, err := p.GetPartyContributionFactorStr(party.ID)
