@@ -428,6 +428,7 @@ func (s *AnalyticsService) getPartyPositions(topicID int) ([]api.PartyPosition, 
 			Party:     &partyName,
 			Sentiment: &sentiment,
 			Relevance: &relevance,
+			GroupId:   &groupID,
 		})
 	}
 

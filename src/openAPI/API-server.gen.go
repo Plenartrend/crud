@@ -230,6 +230,8 @@ type ParliamentaryGroup struct {
 
 // PartyPosition defines model for PartyPosition.
 type PartyPosition struct {
+	// GroupId Parliamentary group ID
+	GroupId   *int     `json:"groupId,omitempty"`
 	Party     *string  `json:"party,omitempty"`
 	Relevance *float32 `json:"relevance,omitempty"`
 	Sentiment *float32 `json:"sentiment,omitempty"`

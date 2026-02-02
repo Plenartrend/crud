@@ -541,6 +541,9 @@ components:
           type: number
         sentiment:
           type: number
+        groupId:
+          type: integer
+          description: Parliamentary group ID
 
     TopTopic:
       type: object
