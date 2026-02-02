@@ -184,7 +184,7 @@ func (s *PoliticiansService) GetPoliticians(electionPeriod *int, groupID *int, p
 	return politicians, totalCount, nil
 }
 
-func (s *PoliticiansService) GetPoliticianDetail(personID int, electionPeriod int, timeRange api.TimeRangeFilter) (*api.PoliticianDetail, error) {
+func (s *PoliticiansService) GetPoliticianDetail(personID int, electionPeriod int) (*api.PoliticianDetail, error) {
 	query := `
 	SELECT r.*, pg.name as faction_name
 		FROM roles r
@@ -245,24 +245,6 @@ func (s *PoliticiansService) GetPoliticianDetail(personID int, electionPeriod in
 			continue
 		}
 		topTopicsWithSentiment[topic.ID] = *topicDetail
-	}
-
-	// Extract topic IDs from topTopicsWithSentiment map for similar sentiment query
-	topicIDsForSimilar := make([]int, 0, len(topTopicsWithSentiment))
-	for topicID := range topTopicsWithSentiment {
-		topicIDsForSimilar = append(topicIDsForSimilar, topicID)
-	}
-
-	similar, err := s.analyticsService.GetPersonsWithSimilarSentiment(topicIDsForSimilar, roleWithFaction.PersonID, electionPeriod, 4)
-	if err != nil {
-		log.Printf("Failed to get persons with similar sentiment: %v", err)
-		similar = []api.Politician{} // Return empty array on error
-	}
-
-	activityTimeSeries, err := s.analyticsService.GetActivityTimeSeries(timeRange, &roleWithFaction.PersonID, nil)
-	if err != nil {
-		log.Printf("Failed to get activity time series: %v", err)
-		activityTimeSeries = []api.TrendDataPoint{}
 	}
 
 	recentSpeeches, err := s.analyticsService.GetSpeechSnippets(nil, &roleWithFaction.PersonID, nil, &electionPeriod, 5)
@@ -328,14 +310,6 @@ func (s *PoliticiansService) GetPoliticianDetail(personID int, electionPeriod in
 		})
 	}
 
-	// Convert similar politicians to string IDs
-	similarIDs := make([]string, 0, len(similar))
-	for _, p := range similar {
-		if p.Id != nil {
-			similarIDs = append(similarIDs, *p.Id)
-		}
-	}
-
 	// Cast to PoliticianDetailContributionFactor for PoliticianDetail type
 	apiDetailContributionFactor := api.PoliticianDetailContributionFactor(apiContributionFactor)
 
@@ -348,12 +322,54 @@ func (s *PoliticiansService) GetPoliticianDetail(personID int, electionPeriod in
 		ContributionFactor: &apiDetailContributionFactor,
 		NumSpeeches:        &numSpeeches,
 		TopTopics:          &apiTopTopics,
-		Similar:            &similarIDs,
 		Speeches:           &recentSpeeches,
-		ActivityData:       &activityTimeSeries,
 	}
 
 	return politicianDetail, nil
+}
+
+func (s *PoliticiansService) GetSimilarPoliticians(personID int, electionPeriod int) ([]api.Politician, error) {
+	// Get top topics for this politician
+	topTopics, err := s.analyticsService.GetTopTopics(electionPeriod, []int{personID}, 4)
+	if err != nil {
+		log.Printf("Failed to get top topics: %v", err)
+		return []api.Politician{}, nil
+	}
+	topTopicsList := topTopics[personID]
+
+	topTopicsWithSentiment := make(map[int]api.TopicDetail)
+	for _, topic := range topTopicsList {
+		topicDetail, err := s.analyticsService.GetTopicDetail(topic.ID, nil, nil)
+		if err != nil {
+			log.Printf("Failed to get topic detail: %v", err)
+			continue
+		}
+		topTopicsWithSentiment[topic.ID] = *topicDetail
+	}
+
+	// Extract topic IDs for similar sentiment query
+	topicIDsForSimilar := make([]int, 0, len(topTopicsWithSentiment))
+	for topicID := range topTopicsWithSentiment {
+		topicIDsForSimilar = append(topicIDsForSimilar, topicID)
+	}
+
+	similar, err := s.analyticsService.GetPersonsWithSimilarSentiment(topicIDsForSimilar, personID, electionPeriod, 4)
+	if err != nil {
+		log.Printf("Failed to get persons with similar sentiment: %v", err)
+		return []api.Politician{}, nil
+	}
+
+	return similar, nil
+}
+
+func (s *PoliticiansService) GetPoliticianActivity(personID int, electionPeriod int, timeRange api.TimeRangeFilter) ([]api.TrendDataPoint, error) {
+	activityTimeSeries, err := s.analyticsService.GetActivityTimeSeries(timeRange, &personID, nil)
+	if err != nil {
+		log.Printf("Failed to get activity time series: %v", err)
+		return []api.TrendDataPoint{}, nil
+	}
+
+	return activityTimeSeries, nil
 }
 
 func contributionFactorToEnum(cfactor string) api.PoliticianContributionFactor {

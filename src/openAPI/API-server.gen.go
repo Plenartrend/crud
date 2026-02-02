@@ -246,7 +246,6 @@ type Politician struct {
 	NumSpeeches *int        `json:"numSpeeches,omitempty"`
 	Party       *string     `json:"party,omitempty"`
 	Role        *string     `json:"role,omitempty"`
-	Similar     *[]string   `json:"similar,omitempty"`
 	TopTopics   *[]TopTopic `json:"topTopics,omitempty"`
 	Volatility  *string     `json:"volatility,omitempty"`
 }
@@ -256,8 +255,6 @@ type PoliticianContributionFactor string
 
 // PoliticianDetail defines model for PoliticianDetail.
 type PoliticianDetail struct {
-	ActivityData *[]TrendDataPoint `json:"activityData,omitempty"`
-
 	// ContributionFactor Contribution factor level
 	ContributionFactor *PoliticianDetailContributionFactor `json:"contributionFactor,omitempty"`
 	Id                 *string                             `json:"id,omitempty"`
@@ -267,7 +264,6 @@ type PoliticianDetail struct {
 	NumSpeeches *int             `json:"numSpeeches,omitempty"`
 	Party       *string          `json:"party,omitempty"`
 	Role        *string          `json:"role,omitempty"`
-	Similar     *[]string        `json:"similar,omitempty"`
 	Speeches    *[]SpeechSnippet `json:"speeches,omitempty"`
 	TopTopics   *[]TopTopic      `json:"topTopics,omitempty"`
 	Volatility  *string          `json:"volatility,omitempty"`
@@ -479,6 +475,21 @@ type GetPoliticiansIdParams struct {
 	TimeRange *TimeRangeFilter `form:"time_range,omitempty" json:"time_range,omitempty"`
 }
 
+// GetPoliticiansIdActivityParams defines parameters for GetPoliticiansIdActivity.
+type GetPoliticiansIdActivityParams struct {
+	// ElectionPeriod Filter by election period (Wahlperiode). If not provided, uses the most recent period for the politician.
+	ElectionPeriod *ElectionPeriodFilter `form:"election_period,omitempty" json:"election_period,omitempty"`
+
+	// TimeRange Time window for the time series. Omit for server default.
+	TimeRange *TimeRangeFilter `form:"time_range,omitempty" json:"time_range,omitempty"`
+}
+
+// GetPoliticiansIdSimilarParams defines parameters for GetPoliticiansIdSimilar.
+type GetPoliticiansIdSimilarParams struct {
+	// ElectionPeriod Filter by election period (Wahlperiode). If not provided, uses the most recent period for the politician.
+	ElectionPeriod *ElectionPeriodFilter `form:"election_period,omitempty" json:"election_period,omitempty"`
+}
+
 // GetSearchParams defines parameters for GetSearch.
 type GetSearchParams struct {
 	// Q The search query string.
@@ -529,6 +540,12 @@ type ServerInterface interface {
 	// Get a specific politician
 	// (GET /politicians/{id})
 	GetPoliticiansId(w http.ResponseWriter, r *http.Request, id string, params GetPoliticiansIdParams)
+	// Get politician activity time series
+	// (GET /politicians/{id}/activity)
+	GetPoliticiansIdActivity(w http.ResponseWriter, r *http.Request, id string, params GetPoliticiansIdActivityParams)
+	// Get similar politicians
+	// (GET /politicians/{id}/similar)
+	GetPoliticiansIdSimilar(w http.ResponseWriter, r *http.Request, id string, params GetPoliticiansIdSimilarParams)
 	// List all reports
 	// (GET /reports)
 	GetReports(w http.ResponseWriter, r *http.Request)
@@ -878,6 +895,86 @@ func (siw *ServerInterfaceWrapper) GetPoliticiansId(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// GetPoliticiansIdActivity operation middleware
+func (siw *ServerInterfaceWrapper) GetPoliticiansIdActivity(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPoliticiansIdActivityParams
+
+	// ------------- Optional query parameter "election_period" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "election_period", r.URL.Query(), &params.ElectionPeriod)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "election_period", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "time_range" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "time_range", r.URL.Query(), &params.TimeRange)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "time_range", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPoliticiansIdActivity(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPoliticiansIdSimilar operation middleware
+func (siw *ServerInterfaceWrapper) GetPoliticiansIdSimilar(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPoliticiansIdSimilarParams
+
+	// ------------- Optional query parameter "election_period" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "election_period", r.URL.Query(), &params.ElectionPeriod)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "election_period", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPoliticiansIdSimilar(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetReports operation middleware
 func (siw *ServerInterfaceWrapper) GetReports(w http.ResponseWriter, r *http.Request) {
 
@@ -1149,6 +1246,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/politicians/least-active", wrapper.GetPoliticiansLeastActive)
 	m.HandleFunc("GET "+options.BaseURL+"/politicians/most-active", wrapper.GetPoliticiansMostActive)
 	m.HandleFunc("GET "+options.BaseURL+"/politicians/{id}", wrapper.GetPoliticiansId)
+	m.HandleFunc("GET "+options.BaseURL+"/politicians/{id}/activity", wrapper.GetPoliticiansIdActivity)
+	m.HandleFunc("GET "+options.BaseURL+"/politicians/{id}/similar", wrapper.GetPoliticiansIdSimilar)
 	m.HandleFunc("GET "+options.BaseURL+"/reports", wrapper.GetReports)
 	m.HandleFunc("GET "+options.BaseURL+"/search", wrapper.GetSearch)
 	m.HandleFunc("GET "+options.BaseURL+"/speeches", wrapper.GetSpeeches)

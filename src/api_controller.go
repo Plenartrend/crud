@@ -162,12 +162,7 @@ func (s *Server) GetPoliticiansId(w http.ResponseWriter, r *http.Request, id str
 		log.Printf("Using provided election period: %d", electionPeriod)
 	}
 
-	timeRange := api.TimeRangeFilter("last_year")
-	if params.TimeRange != nil {
-		timeRange = *params.TimeRange
-	}
-
-	politicianDetail, err := s.politiciansService.GetPoliticianDetail(personID, electionPeriod, timeRange)
+	politicianDetail, err := s.politiciansService.GetPoliticianDetail(personID, electionPeriod)
 	if err != nil {
 		log.Printf("Failed to get politician details: %v", err)
 		http.Error(w, "Politician not found", http.StatusNotFound)
@@ -177,6 +172,85 @@ func (s *Server) GetPoliticiansId(w http.ResponseWriter, r *http.Request, id str
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(politicianDetail)
+}
+
+func (s *Server) GetPoliticiansIdSimilar(w http.ResponseWriter, r *http.Request, id string, params api.GetPoliticiansIdSimilarParams) {
+	log.Printf("GetPoliticiansIdSimilar called with id=%s, params=%+v", id, params)
+	
+	personID, err := strconv.Atoi(id)
+	if err != nil {
+		log.Printf("Failed to convert ID to int: %v", err)
+		http.Error(w, "Failed to convert ID to int", http.StatusBadRequest)
+		return
+	}
+
+	var electionPeriod int
+	if params.ElectionPeriod == nil {
+		log.Printf("No election period provided, fetching max for person %d", personID)
+		electionPeriod, err = s.analyticsService.GetMaxElectionPeriod(personID)
+		if err != nil {
+			log.Printf("Failed to get max election period: %v", err)
+			http.Error(w, "Failed to get max election period", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Using max election period: %d", electionPeriod)
+	} else {
+		electionPeriod = int(*params.ElectionPeriod)
+		log.Printf("Using provided election period: %d", electionPeriod)
+	}
+
+	similar, err := s.politiciansService.GetSimilarPoliticians(personID, electionPeriod)
+	if err != nil {
+		log.Printf("Failed to get similar politicians: %v", err)
+		http.Error(w, "Failed to get similar politicians", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(similar)
+}
+
+func (s *Server) GetPoliticiansIdActivity(w http.ResponseWriter, r *http.Request, id string, params api.GetPoliticiansIdActivityParams) {
+	log.Printf("GetPoliticiansIdActivity called with id=%s, params=%+v", id, params)
+	
+	personID, err := strconv.Atoi(id)
+	if err != nil {
+		log.Printf("Failed to convert ID to int: %v", err)
+		http.Error(w, "Failed to convert ID to int", http.StatusBadRequest)
+		return
+	}
+
+	var electionPeriod int
+	if params.ElectionPeriod == nil {
+		log.Printf("No election period provided, fetching max for person %d", personID)
+		electionPeriod, err = s.analyticsService.GetMaxElectionPeriod(personID)
+		if err != nil {
+			log.Printf("Failed to get max election period: %v", err)
+			http.Error(w, "Failed to get max election period", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Using max election period: %d", electionPeriod)
+	} else {
+		electionPeriod = int(*params.ElectionPeriod)
+		log.Printf("Using provided election period: %d", electionPeriod)
+	}
+
+	timeRange := api.TimeRangeFilter("last_year")
+	if params.TimeRange != nil {
+		timeRange = *params.TimeRange
+	}
+
+	activityData, err := s.politiciansService.GetPoliticianActivity(personID, electionPeriod, timeRange)
+	if err != nil {
+		log.Printf("Failed to get politician activity: %v", err)
+		http.Error(w, "Failed to get politician activity", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(activityData)
 }
 
 func (s *Server) GetElectionPeriods(w http.ResponseWriter, r *http.Request) {

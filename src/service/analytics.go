@@ -491,7 +491,6 @@ func (s *AnalyticsService) getStakeholders(topicID int) ([]api.Politician, []api
 			Name:               &fullName,
 			Party:              &groupName,
 			Role:               &roleStr,
-			Similar:            nil,
 			TopTopics:          nil,
 			Volatility:         nil,
 		}

@@ -127,6 +127,55 @@ paths:
         '404':
           description: Politician not found.
 
+  /politicians/{id}/similar:
+    get:
+      summary: Get similar politicians
+      description: Retrieves politicians with similar sentiment on the same topics.
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: The ID of the politician.
+        - $ref: '#/components/parameters/ElectionPeriodFilter'
+      responses:
+        '200':
+          description: List of similar politicians.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Politician'
+        '404':
+          description: Politician not found.
+
+  /politicians/{id}/activity:
+    get:
+      summary: Get politician activity time series
+      description: Retrieves the activity trend over time for a politician.
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: The ID of the politician.
+        - $ref: '#/components/parameters/ElectionPeriodFilter'
+        - $ref: '#/components/parameters/TimeRangeFilter'
+      responses:
+        '200':
+          description: Activity time series data.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TrendDataPoint'
+        '404':
+          description: Politician not found.
+
   /politicians/most-active:
     get:
       summary: Get most active politicians
@@ -580,10 +629,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TopTopic'
-        similar:
-          type: array
-          items:
-            type: string
 
     ActivePolitician:
       type: object
@@ -680,10 +725,6 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/SpeechSnippet'
-            activityData:
-              type: array
-              items:
-                $ref: '#/components/schemas/TrendDataPoint'
 
     SpeechDetail:
       allOf:
