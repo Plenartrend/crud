@@ -364,7 +364,7 @@ func (s *Server) GetElectionPeriods(w http.ResponseWriter, r *http.Request) {
 	log.Printf("GetElectionPeriods called")
 
 	var periods []types.ElectionPeriod
-	err := s.db.Select(&periods, "SELECT * FROM election_periods ORDER BY number DESC")
+	err := s.db.Select(&periods, "SELECT DISTINCT ep.* FROM analysed_protocols ap JOIN election_periods ep ON ap.election_period = ep.number")
 	if err != nil {
 		log.Printf("Failed to query election periods: %v", err)
 		http.Error(w, "Failed to query election periods", http.StatusInternalServerError)
