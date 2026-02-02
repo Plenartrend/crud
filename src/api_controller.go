@@ -441,7 +441,7 @@ func (s *Server) GetTopicsId(w http.ResponseWriter, r *http.Request, id string) 
 	}
 	log.Printf("Fetching topic with ID: %d", topicID)
 
-	topicDetail, err := s.topicsService.GetTopicDetail(topicID, nil, nil)
+	topicDetail, err := s.topicsService.GetTopicDetail(topicID, nil, nil, nil)
 	if err != nil {
 		log.Printf("Failed to get topic detail: %v", err)
 		http.Error(w, "Failed to query topic", http.StatusInternalServerError)

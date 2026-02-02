@@ -128,15 +128,23 @@ func (s *TopicsService) GetAnalysisTimeSeries(timeRange api.TimeRangeFilter, top
 	return dataPoints, nil
 }
 
-func (s *TopicsService) GetTopicDetail(topicID int, groupID *int, personID *int) (*api.TopicDetail, error) {
+func (s *TopicsService) GetTopicDetail(topicID int, groupID *int, personID *int, electionPeriod *int) (*api.TopicDetail, error) {
 	dataQuery := `
+	    WITH last_date_for_election_period AS (
+			SELECT CASE 
+				WHEN $4::int IS NULL THEN CURRENT_DATE 
+				ELSE MAX(date)::date 
+			END as last_date 
+			FROM analysed_protocols 
+			WHERE $4::int IS NULL OR election_period = $4::int
+		)
 		SELECT t.id, t.name, t.updated, t.created, ta.topic_relevance, ta.avg_sentiment
 		FROM topics t
-		JOIN get_topic_analytics(CURRENT_DATE, 20, $2, $3) AS ta ON ta.topic_id = t.id
+		JOIN get_topic_analytics((SELECT last_date FROM last_date_for_election_period), 20, $2, $3) AS ta ON ta.topic_id = t.id
 		WHERE t.id = $1
 	`
 	var topicWithAnalytics types.TopicWithAnalytics
-	err := s.db.Get(&topicWithAnalytics, dataQuery, topicID, groupID, personID)
+	err := s.db.Get(&topicWithAnalytics, dataQuery, topicID, groupID, personID, electionPeriod)
 	if err != nil {
 		log.Printf("Failed to query topic with analytics: %v", err)
 		return nil, err

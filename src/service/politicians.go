@@ -239,7 +239,7 @@ func (s *PoliticiansService) GetPoliticianDetail(personID int, electionPeriod in
 	topTopicsWithSentiment := make(map[int]api.TopicDetail)
 	for _, topic := range topTopicsList {
 		personIDPtr := &roleWithFaction.PersonID
-		topicDetail, err := s.topicsService.GetTopicDetail(topic.ID, nil, personIDPtr)
+		topicDetail, err := s.topicsService.GetTopicDetail(topic.ID, nil, personIDPtr, &electionPeriod)
 		if err != nil {
 			log.Printf("Failed to get topic detail: %v", err)
 			continue
@@ -340,7 +340,7 @@ func (s *PoliticiansService) GetSimilarPoliticians(personID int, electionPeriod 
 	topTopicsWithSentiment := make(map[int]api.TopicDetail)
 	for _, topic := range topTopicsList {
 		personIDPtr := &personID
-		topicDetail, err := s.topicsService.GetTopicDetail(topic.ID, nil, personIDPtr)
+		topicDetail, err := s.topicsService.GetTopicDetail(topic.ID, nil, personIDPtr, &electionPeriod)
 		if err != nil {
 			log.Printf("Failed to get topic detail: %v", err)
 			continue
@@ -354,7 +354,7 @@ func (s *PoliticiansService) GetSimilarPoliticians(personID int, electionPeriod 
 		topicIDsForSimilar = append(topicIDsForSimilar, topicID)
 	}
 
-	similar, err := s.GetPersonsWithSimilarSentiment(topicIDsForSimilar, personID, electionPeriod, 4)
+	similar, err := s.GetPoliticiansWithSimilarSentiment(topicIDsForSimilar, personID, electionPeriod, 4)
 	if err != nil {
 		log.Printf("Failed to get persons with similar sentiment: %v", err)
 		return []api.Politician{}, nil
@@ -624,7 +624,7 @@ func (s *PoliticiansService) GetTopTopics(electionPeriod int, personIDs []int, n
 	return topicsMap, nil
 }
 
-func (s *PoliticiansService) GetPersonsWithSimilarSentiment(topicIDs []int, personID int, electionPeriod int, numOfPersons int) ([]api.Politician, error) {
+func (s *PoliticiansService) GetPoliticiansWithSimilarSentiment(topicIDs []int, personID int, electionPeriod int, numOfPersons int) ([]api.Politician, error) {
 
 	query := `
 		WITH last_date_for_election_period AS (
