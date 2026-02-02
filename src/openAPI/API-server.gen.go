@@ -416,7 +416,7 @@ type GetParliamentaryGroupsParams struct {
 
 // GetPoliticiansParams defines parameters for GetPoliticians.
 type GetPoliticiansParams struct {
-	// PageSize Number of items per page. Default is 20, maximum is 100.
+	// PageSize Number of items per page. If not provided, all items are returned. Maximum is 100.
 	PageSize *PageSize `form:"page_size,omitempty" json:"page_size,omitempty"`
 
 	// Offset Number of items to skip (for pagination). Default is 0.
@@ -437,7 +437,7 @@ type GetSearchParams struct {
 
 // GetTopicsParams defines parameters for GetTopics.
 type GetTopicsParams struct {
-	// PageSize Number of items per page. Default is 20, maximum is 100.
+	// PageSize Number of items per page. If not provided, all items are returned. Maximum is 100.
 	PageSize *PageSize `form:"page_size,omitempty" json:"page_size,omitempty"`
 
 	// Offset Number of items to skip (for pagination). Default is 0.

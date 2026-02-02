@@ -265,12 +265,11 @@ components:
       in: query
       name: page_size
       required: false
-      description: Number of items per page. Default is 20, maximum is 100.
+      description: Number of items per page. If not provided, all items are returned. Maximum is 100.
       schema:
         type: integer
         minimum: 1
         maximum: 100
-        default: 20
     Offset:
       in: query
       name: offset

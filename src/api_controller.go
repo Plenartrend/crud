@@ -78,7 +78,7 @@ func (s *Server) GetDashboard(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func (s *Server) getPoliticians(electionPeriod *int, groupID *int, pageSize int, offset int) ([]api.Politician, int, error) {
+func (s *Server) getPoliticians(electionPeriod *int, groupID *int, pageSize *int, offset int) ([]api.Politician, int, error) {
 	politicians := []api.Politician{}
 	log.Printf("Getting politicians for election period: %d, groupID: %v, pageSize: %d, offset: %d", electionPeriod, groupID, pageSize, offset)
 
@@ -103,7 +103,7 @@ func (s *Server) getPoliticians(electionPeriod *int, groupID *int, pageSize int,
 		WHERE r.election_period = $1
 		AND CASE WHEN $4::integer IS NOT NULL THEN r.group_id = $4::integer ELSE TRUE END
 		ORDER BY r.last_name, r.first_name
-		LIMIT $2 OFFSET $3
+		LIMIT CASE WHEN $2::integer IS NULL THEN NULL ELSE $2::integer END OFFSET CASE WHEN $2::integer IS NULL THEN 0 ELSE $3 END
 	`)
 
 	countQuery := (`
@@ -250,11 +250,6 @@ func (s *Server) GetPoliticians(w http.ResponseWriter, r *http.Request, params a
 	log.Printf("Raw query string: %s", r.URL.RawQuery)
 
 	// Get pagination parameters
-	pageSize := 20
-	if params.PageSize != nil {
-		pageSize = *params.PageSize
-	}
-
 	offset := 0
 	if params.Offset != nil {
 		offset = *params.Offset
@@ -273,15 +268,26 @@ func (s *Server) GetPoliticians(w http.ResponseWriter, r *http.Request, params a
 		log.Printf("No group ID filter received")
 	}
 
-	politicians, totalCount, err := s.getPoliticians(electionPeriod, groupID, pageSize, offset)
+	politicians, totalCount, err := s.getPoliticians(electionPeriod, groupID, params.PageSize, offset)
 	if err != nil {
 		log.Printf("Failed to query politicians: %v", err)
 		http.Error(w, "Failed to query politicians", http.StatusInternalServerError)
 		return
 	}
 
-	// Calculate current page
-	page := (offset / pageSize) + 1
+	var page int
+	if params.PageSize == nil {
+		page = 1
+	} else {
+		page = (offset / *params.PageSize) + 1
+	}
+
+	var pageSize int
+	if params.PageSize == nil {
+		pageSize = totalCount
+	} else {
+		pageSize = *params.PageSize
+	}
 
 	response := api.PaginatedPoliticians{
 		Data:       politicians,
@@ -428,8 +434,8 @@ func (s *Server) GetReports(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) GetSearch(w http.ResponseWriter, r *http.Request, params api.GetSearchParams) {
-	// Use a large page size to get all politicians for search
-	politicians, _, err := s.getPoliticians(nil, nil, 1000, 0)
+	// Use nil page size to get all politicians for search
+	politicians, _, err := s.getPoliticians(nil, nil, nil, 0)
 	if err != nil {
 		log.Printf("Failed to query politicians: %v", err)
 		http.Error(w, "Failed to query politicians", http.StatusInternalServerError)
