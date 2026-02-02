@@ -16,17 +16,21 @@ import (
 )
 
 type Server struct {
-	db                  *sqlx.DB
-	analyticsService    *service.AnalyticsService
-	politiciansService  *service.PoliticiansService
+	db                 *sqlx.DB
+	politiciansService *service.PoliticiansService
+	topicsService      *service.TopicsService
+	helpersService     *service.HelpersService
 }
 
 func NewServer(db *sqlx.DB) *Server {
-	analyticsService := service.NewAnalyticsService(db)
+	helpersService := service.NewHelpersService(db)
+	topicsService := service.NewTopicsService(db, helpersService)
+	politiciansService := service.NewPoliticiansService(db, topicsService, helpersService)
 	return &Server{
 		db:                 db,
-		analyticsService:   analyticsService,
-		politiciansService: service.NewPoliticiansService(db, analyticsService),
+		politiciansService: politiciansService,
+		topicsService:      topicsService,
+		helpersService:     helpersService,
 	}
 }
 
@@ -59,7 +63,7 @@ func (s *Server) GetAnalysisTimeSeries(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 
-	dataPoints, err := s.analyticsService.GetAnalysisTimeSeries(*params.TimeRange, params.TopicId, params.PersonId, params.GroupId)
+	dataPoints, err := s.topicsService.GetAnalysisTimeSeries(*params.TimeRange, params.TopicId, params.PersonId, params.GroupId)
 	if err != nil {
 		log.Printf("Failed to get analysis time series: %v", err)
 		http.Error(w, "Failed to get analysis time series", http.StatusInternalServerError)
@@ -112,17 +116,13 @@ func (s *Server) GetPoliticians(w http.ResponseWriter, r *http.Request, params a
 	}
 
 	var page int
-	if params.PageSize == nil {
-		page = 1
-	} else {
-		page = (offset / *params.PageSize) + 1
-	}
-
 	var pageSize int
 	if params.PageSize == nil {
+		page = 1
 		pageSize = totalCount
 	} else {
 		pageSize = *params.PageSize
+		page = PageFromOffset(offset, pageSize)
 	}
 
 	response := api.PaginatedPoliticians{
@@ -139,7 +139,7 @@ func (s *Server) GetPoliticians(w http.ResponseWriter, r *http.Request, params a
 
 func (s *Server) GetPoliticiansId(w http.ResponseWriter, r *http.Request, id string, params api.GetPoliticiansIdParams) {
 	log.Printf("GetPoliticiansId called with id=%s, params=%+v", id, params)
-	
+
 	personID, err := strconv.Atoi(id)
 	if err != nil {
 		log.Printf("Failed to convert ID to int: %v", err)
@@ -150,7 +150,7 @@ func (s *Server) GetPoliticiansId(w http.ResponseWriter, r *http.Request, id str
 	var electionPeriod int
 	if params.ElectionPeriod == nil {
 		log.Printf("No election period provided, fetching max for person %d", personID)
-		electionPeriod, err = s.analyticsService.GetMaxElectionPeriod(personID)
+		electionPeriod, err = s.helpersService.GetMaxElectionPeriod(personID)
 		if err != nil {
 			log.Printf("Failed to get max election period: %v", err)
 			http.Error(w, "Failed to get max election period", http.StatusInternalServerError)
@@ -176,7 +176,7 @@ func (s *Server) GetPoliticiansId(w http.ResponseWriter, r *http.Request, id str
 
 func (s *Server) GetPoliticiansIdSimilar(w http.ResponseWriter, r *http.Request, id string, params api.GetPoliticiansIdSimilarParams) {
 	log.Printf("GetPoliticiansIdSimilar called with id=%s, params=%+v", id, params)
-	
+
 	personID, err := strconv.Atoi(id)
 	if err != nil {
 		log.Printf("Failed to convert ID to int: %v", err)
@@ -187,7 +187,7 @@ func (s *Server) GetPoliticiansIdSimilar(w http.ResponseWriter, r *http.Request,
 	var electionPeriod int
 	if params.ElectionPeriod == nil {
 		log.Printf("No election period provided, fetching max for person %d", personID)
-		electionPeriod, err = s.analyticsService.GetMaxElectionPeriod(personID)
+		electionPeriod, err = s.helpersService.GetMaxElectionPeriod(personID)
 		if err != nil {
 			log.Printf("Failed to get max election period: %v", err)
 			http.Error(w, "Failed to get max election period", http.StatusInternalServerError)
@@ -213,7 +213,7 @@ func (s *Server) GetPoliticiansIdSimilar(w http.ResponseWriter, r *http.Request,
 
 func (s *Server) GetPoliticiansIdActivity(w http.ResponseWriter, r *http.Request, id string, params api.GetPoliticiansIdActivityParams) {
 	log.Printf("GetPoliticiansIdActivity called with id=%s, params=%+v", id, params)
-	
+
 	personID, err := strconv.Atoi(id)
 	if err != nil {
 		log.Printf("Failed to convert ID to int: %v", err)
@@ -224,7 +224,7 @@ func (s *Server) GetPoliticiansIdActivity(w http.ResponseWriter, r *http.Request
 	var electionPeriod int
 	if params.ElectionPeriod == nil {
 		log.Printf("No election period provided, fetching max for person %d", personID)
-		electionPeriod, err = s.analyticsService.GetMaxElectionPeriod(personID)
+		electionPeriod, err = s.helpersService.GetMaxElectionPeriod(personID)
 		if err != nil {
 			log.Printf("Failed to get max election period: %v", err)
 			http.Error(w, "Failed to get max election period", http.StatusInternalServerError)
@@ -240,11 +240,10 @@ func (s *Server) GetPoliticiansIdActivity(w http.ResponseWriter, r *http.Request
 	if params.TimeRange != nil {
 		timeRange = *params.TimeRange
 	}
-
-	activityData, err := s.politiciansService.GetPoliticianActivity(personID, electionPeriod, timeRange)
+	activityData, err := s.politiciansService.GetActivityTimeSeries(timeRange, &personID, nil)
 	if err != nil {
-		log.Printf("Failed to get politician activity: %v", err)
-		http.Error(w, "Failed to get politician activity", http.StatusInternalServerError)
+		log.Printf("Failed to get activity time series: %v", err)
+		http.Error(w, "Failed to get activity time series", http.StatusInternalServerError)
 		return
 	}
 
@@ -447,62 +446,18 @@ func (s *Server) GetTopics(w http.ResponseWriter, r *http.Request, params api.Ge
 	log.Printf("GetTopics called")
 	pageSize, offset := PaginationFromRequest(r)
 
-	// Total count
-	var totalItems int
-	err := s.db.Get(&totalItems, `
-		SELECT COUNT(*) FROM get_topic_analytics(CURRENT_DATE, 20, NULL, NULL) AS ta
-		JOIN topics t ON t.id = ta.topic_id
-	`)
-	if err != nil {
-		log.Printf("Failed to count topics: %v", err)
-		http.Error(w, "Failed to query topics", http.StatusInternalServerError)
-		return
-	}
-
-	meta := PaginationMeta{
-		Page:       PageFromOffset(offset, pageSize),
-		PageSize:   pageSize,
-		TotalItems: totalItems,
-	}
-
-	dataQuery := `
-		SELECT t.id, t.name, t.updated, t.created, ta.topic_relevance, ta.avg_sentiment
-		FROM get_topic_analytics(CURRENT_DATE, 20, NULL, NULL) AS ta
-		JOIN topics t ON t.id = ta.topic_id
-		ORDER BY ta.topic_relevance DESC
-		LIMIT $1 OFFSET $2
-	`
-	var rows []types.TopicWithAnalytics
-	err = s.db.Select(&rows, dataQuery, pageSize, offset)
+	topics, totalItems, err := s.topicsService.GetTopics(pageSize, offset)
 	if err != nil {
 		log.Printf("Failed to query topics: %v", err)
 		http.Error(w, "Failed to query topics", http.StatusInternalServerError)
 		return
 	}
-	for _, row := range rows {
-		log.Printf("Topic: %v", row.Name)
-		log.Printf("TopicRelevance: %v", row.TopicRelevance)
-		log.Printf("AvgSentiment: %v", row.AvgSentiment)
-	}
-
-	data := make([]api.Topic, 0, len(rows))
-	for _, row := range rows {
-		idStr := strconv.Itoa(row.ID)
-		rel := float32(row.TopicRelevance)
-		sent := float32(row.AvgSentiment)
-		data = append(data, api.Topic{
-			Id:        &idStr,
-			Title:     &row.Name,
-			Relevance: &rel,
-			Sentiment: &sent,
-		})
-	}
 
 	paginatedTopics := api.PaginatedTopics{
-		Data:       data,
-		Page:       meta.Page,
-		PageSize:   meta.PageSize,
-		TotalItems: meta.TotalItems,
+		Data:       topics,
+		Page:       PageFromOffset(offset, pageSize),
+		PageSize:   pageSize,
+		TotalItems: totalItems,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -520,7 +475,7 @@ func (s *Server) GetTopicsId(w http.ResponseWriter, r *http.Request, id string) 
 	}
 	log.Printf("Fetching topic with ID: %d", topicID)
 
-	topicDetail, err := s.analyticsService.GetTopicDetail(topicID, nil, nil)
+	topicDetail, err := s.topicsService.GetTopicDetail(topicID, nil, nil)
 	if err != nil {
 		log.Printf("Failed to get topic detail: %v", err)
 		http.Error(w, "Failed to query topic", http.StatusInternalServerError)
@@ -593,7 +548,7 @@ func (s *Server) GetPoliticiansMostActive(w http.ResponseWriter, r *http.Request
 
 	log.Printf("GetPoliticiansMostActive called with limit=%d, election_period=%d", limit, period)
 
-	activePoliticians, err := s.analyticsService.GetActivePoliticians(period, limit, true)
+	activePoliticians, err := s.politiciansService.GetActivePoliticians(period, limit, true)
 	if err != nil {
 		log.Printf("Failed to get most active politicians: %v", err)
 		http.Error(w, "Failed to get most active politicians", http.StatusInternalServerError)
@@ -621,7 +576,7 @@ func (s *Server) GetPoliticiansLeastActive(w http.ResponseWriter, r *http.Reques
 
 	log.Printf("GetPoliticiansLeastActive called with limit=%d, election_period=%d", limit, period)
 
-	activePoliticians, err := s.analyticsService.GetActivePoliticians(period, limit, false)
+	activePoliticians, err := s.politiciansService.GetActivePoliticians(period, limit, false)
 	if err != nil {
 		log.Printf("Failed to get least active politicians: %v", err)
 		http.Error(w, "Failed to get least active politicians", http.StatusInternalServerError)
