@@ -689,7 +689,7 @@ func (s *AnalyticsService) GetPersonsWithSimilarSentiment(topicIDs []int, person
 		)
 		SELECT 
 			p.id::text as id,
-			COALESCE(r.title, '') as name,
+			COALESCE(r.title, r.first_name || ' ' || r.last_name, '') as name,
 			COALESCE(pg.name, '') as party
 		FROM similar_persons sp
 		JOIN persons p ON p.id = sp.person_id

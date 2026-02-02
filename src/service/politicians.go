@@ -239,7 +239,8 @@ func (s *PoliticiansService) GetPoliticianDetail(personID int, electionPeriod in
 
 	topTopicsWithSentiment := make(map[int]api.TopicDetail)
 	for _, topic := range topTopicsList {
-		topicDetail, err := s.analyticsService.GetTopicDetail(topic.ID, nil, nil)
+		personIDPtr := &roleWithFaction.PersonID
+		topicDetail, err := s.analyticsService.GetTopicDetail(topic.ID, nil, personIDPtr)
 		if err != nil {
 			log.Printf("Failed to get topic detail: %v", err)
 			continue
@@ -339,7 +340,8 @@ func (s *PoliticiansService) GetSimilarPoliticians(personID int, electionPeriod 
 
 	topTopicsWithSentiment := make(map[int]api.TopicDetail)
 	for _, topic := range topTopicsList {
-		topicDetail, err := s.analyticsService.GetTopicDetail(topic.ID, nil, nil)
+		personIDPtr := &personID
+		topicDetail, err := s.analyticsService.GetTopicDetail(topic.ID, nil, personIDPtr)
 		if err != nil {
 			log.Printf("Failed to get topic detail: %v", err)
 			continue
