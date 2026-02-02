@@ -27,7 +27,7 @@ func (s *AnalyticsService) GetAnalysisTimeSeries(timeRange api.TimeRangeFilter, 
 		timeRange, topicID, personID, groupID)
 
 	// Calculate start and end dates for the time range
-	startDate, endDate, err := s.getDateRangeForTimeRange(string(timeRange))
+	startDate, endDate, err := s.getDateRangeForTimeRange(string(timeRange), nil)
 	if err != nil {
 		log.Printf("[Analytics] ERROR: Failed to get date range: %v", err)
 		return nil, err
@@ -186,7 +186,7 @@ func (s *AnalyticsService) GetVolatility(electionPeriod int, personIDs []int) (m
 }
 
 // TODO: Maybe only show speeches we actually analyzed?
-func (s *AnalyticsService) GetNumberOfSpeeches(electionPeriod int, personIDs []int) (map[int]int, error) {
+func (s *AnalyticsService) GetNumberOfSpeeches(electionPeriod int, personIDs []int, topicID *int) (map[int]int, error) {
 	if len(personIDs) == 0 {
 		return make(map[int]int), nil
 	}
@@ -196,9 +196,11 @@ func (s *AnalyticsService) GetNumberOfSpeeches(electionPeriod int, personIDs []i
 		FROM activities a
 		JOIN protocols p ON p.id = a.protocol_id
 		JOIN roles r ON r.id = a.role_id
+		LEFT JOIN activity_mappings am ON am.activity_id = a.id
 		WHERE p.election_period = $1 
 		AND a.type LIKE 'Rede%'
 		AND r.person_id = ANY($2)
+		AND ($3::int IS NULL OR am.topic_id = $3::int)
 		GROUP BY r.person_id
 	`
 
@@ -208,7 +210,7 @@ func (s *AnalyticsService) GetNumberOfSpeeches(electionPeriod int, personIDs []i
 	}
 
 	var results []Result
-	err := s.db.Select(&results, query, electionPeriod, pq.Array(personIDs))
+	err := s.db.Select(&results, query, electionPeriod, pq.Array(personIDs), topicID)
 	if err != nil {
 		log.Printf("Failed to get speech counts: %v", err)
 		return nil, err
@@ -287,24 +289,26 @@ func (s *AnalyticsService) getFirstAndLastAnalyzedDate() (time.Time, time.Time, 
 }
 
 // getDateRangeForTimeRange calculates start and end dates for time series queries
-func (s *AnalyticsService) getDateRangeForTimeRange(timeRange string) (time.Time, time.Time, error) {
+func (s *AnalyticsService) getDateRangeForTimeRange(timeRange string, endDate *time.Time) (time.Time, time.Time, error) {
 	now := time.Now()
-	endDate := now
+	if endDate == nil {
+		endDate = &now
+	}
 	var startDate time.Time
 
 	switch timeRange {
 	case "last_month":
-		startDate = now.AddDate(0, -1, 0)
+		startDate = endDate.AddDate(0, -1, 0)
 	case "last_6_months":
-		startDate = now.AddDate(0, -6, 0)
+		startDate = endDate.AddDate(0, -6, 0)
 	case "ytd":
-		startDate = time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+		startDate = time.Date(endDate.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
 	case "last_year":
-		startDate = now.AddDate(-1, 0, 0)
+		startDate = endDate.AddDate(-1, 0, 0)
 	case "last_2_years":
-		startDate = now.AddDate(-2, 0, 0)
+		startDate = endDate.AddDate(-2, 0, 0)
 	case "last_5_years":
-		startDate = now.AddDate(-5, 0, 0)
+		startDate = endDate.AddDate(-5, 0, 0)
 	case "max":
 		firstProtocolDate, lastProtocolDate, err := s.getFirstAndLastAnalyzedDate()
 		if err != nil {
@@ -317,18 +321,18 @@ func (s *AnalyticsService) getDateRangeForTimeRange(timeRange string) (time.Time
 		return time.Time{}, time.Time{}, sql.ErrNoRows
 	}
 
-	return startDate, endDate, nil
+	return startDate, *endDate, nil
 }
 
-func (s *AnalyticsService) GetTopicDetail(topicID int) (*api.TopicDetail, error) {
+func (s *AnalyticsService) GetTopicDetail(topicID int, groupID *int, personID *int) (*api.TopicDetail, error) {
 	dataQuery := `
 		SELECT t.id, t.name, t.updated, t.created, ta.topic_relevance, ta.avg_sentiment
 		FROM topics t
-		JOIN get_topic_analytics(CURRENT_DATE, 20, NULL, NULL) AS ta ON ta.topic_id = t.id
+		JOIN get_topic_analytics(CURRENT_DATE, 20, $2, $3) AS ta ON ta.topic_id = t.id
 		WHERE t.id = $1
 	`
 	var topicWithAnalytics types.TopicWithAnalytics
-	err := s.db.Get(&topicWithAnalytics, dataQuery, topicID)
+	err := s.db.Get(&topicWithAnalytics, dataQuery, topicID, groupID, personID)
 	if err != nil {
 		log.Printf("Failed to query topic with analytics: %v", err)
 		return nil, err
@@ -364,7 +368,7 @@ func (s *AnalyticsService) GetTopicDetail(topicID int) (*api.TopicDetail, error)
 		Contra: &contraPoliticians,
 	}
 
-	speeches, err := s.getSpeechSnippets(topicID)
+	speeches, err := s.GetSpeechSnippets(&topicID, nil, nil, nil, 5)
 	if err != nil {
 		log.Printf("Failed to get speeches: %v", err)
 	}
@@ -509,7 +513,8 @@ func (s *AnalyticsService) getStakeholders(topicID int) ([]api.Politician, []api
 	return proPoliticians, contraPoliticians, nil
 }
 
-func (s *AnalyticsService) getSpeechSnippets(topicID int) ([]api.SpeechSnippet, error) {
+// TODO: Is this not simply getSpeeches?
+func (s *AnalyticsService) GetSpeechSnippets(topicID *int, personID *int, groupId *int, electionPeriod *int, limit int) ([]api.SpeechSnippet, error) {
 	type SpeechWithRole struct {
 		ActivityID   int            `db:"activity_id"`
 		Text         string         `db:"text"`
@@ -523,7 +528,7 @@ func (s *AnalyticsService) getSpeechSnippets(topicID int) ([]api.SpeechSnippet, 
 
 	var speechData []SpeechWithRole
 	err := s.db.Select(&speechData, `
-		SELECT 
+		SELECT DISTINCT ON (a.id)
 			a.id as activity_id,
 			a.text,
 			p.date as protocol_date,
@@ -537,15 +542,18 @@ func (s *AnalyticsService) getSpeechSnippets(topicID int) ([]api.SpeechSnippet, 
 		JOIN roles r ON r.id = a.role_id
 		JOIN protocols p ON p.id = a.protocol_id
 		LEFT JOIN parliamentary_groups pg ON pg.id = r.group_id
-		WHERE am.topic_id = $1
-		ORDER BY p.date DESC
-		LIMIT 5
-	`, topicID)
+		WHERE ($1::int IS NULL OR am.topic_id = $1::int)
+		AND ($2::int IS NULL OR r.person_id = $2::int)
+		AND ($3::int IS NULL OR r.group_id = $3::int)
+		AND ($4::int IS NULL OR p.election_period = $4::int)
+		ORDER BY a.id, p.date DESC
+		LIMIT $5::int
+	`, topicID, personID, groupId, electionPeriod, limit)
 	if err != nil {
 		log.Printf("Failed to get speeches: %v", err)
 		return nil, err
 	}
-	log.Printf("Found %d speeches for topic %d", len(speechData), topicID)
+	log.Printf("Found %d speeches for topic %d, person %d, group %d", len(speechData), topicID, personID, groupId)
 
 	speeches := []api.SpeechSnippet{}
 	for _, speech := range speechData {
@@ -573,11 +581,15 @@ func (s *AnalyticsService) getSpeechSnippets(topicID int) ([]api.SpeechSnippet, 
 		}
 
 		activityIDStr := strconv.Itoa(speech.ActivityID)
-		topicIDStr := strconv.Itoa(topicID)
+		var topicIDStr *string
+		if topicID != nil {
+			str := strconv.Itoa(*topicID)
+			topicIDStr = &str
+		}
 
 		speeches = append(speeches, api.SpeechSnippet{
 			Id:           &activityIDStr,
-			TopicId:      &topicIDStr,
+			TopicId:      topicIDStr,
 			Speaker:      &speakerName,
 			Party:        &partyName,
 			Text:         &speech.Text,
@@ -588,6 +600,128 @@ func (s *AnalyticsService) getSpeechSnippets(topicID int) ([]api.SpeechSnippet, 
 	}
 	log.Printf("Built %d speech snippets", len(speeches))
 	return speeches, nil
+}
+
+func (s *AnalyticsService) GetActivityTimeSeries(timeRange api.TimeRangeFilter, personID, groupID *int) ([]api.TrendDataPoint, error) {
+	startDate, endDate, err := s.getDateRangeForTimeRange(string(timeRange), nil)
+	if err != nil {
+		log.Printf("Failed to get date range: %v", err)
+		return nil, err
+	}
+
+	type ActivityRow struct {
+		MonthDate   string `db:"month_date"`
+		SpeechCount int64  `db:"speech_count"`
+	}
+
+	query := `
+		SELECT month_date::text as month_date, speech_count FROM get_time_series_activity($1::date, $2::date, $3::int, $4::int)
+	`
+	var rows []ActivityRow
+	err = s.db.Select(&rows, query, startDate, endDate, personID, groupID)
+	if err != nil {
+		log.Printf("Failed to get activity time series: %v", err)
+		return nil, err
+	}
+
+	// Convert to api.TrendDataPoint
+	activityTimeSeries := make([]api.TrendDataPoint, len(rows))
+	for i, row := range rows {
+		date := row.MonthDate
+		value := float32(row.SpeechCount)
+		activityTimeSeries[i] = api.TrendDataPoint{
+			Date:  &date,
+			Value: &value,
+		}
+	}
+
+	return activityTimeSeries, nil
+}
+
+func (s *AnalyticsService) GetRelevanceTimeSeries(timeRange api.TimeRangeFilter, topicID, personID, groupID *int) ([]api.TrendDataPoint, error) {
+	startDate, endDate, err := s.getDateRangeForTimeRange(string(timeRange), nil)
+	if err != nil {
+		log.Printf("Failed to get date range: %v", err)
+		return nil, err
+	}
+	query := `
+		SELECT * FROM get_relevance_time_series($1, $2, $3, $4)
+	`
+	var relevanceTimeSeries []api.TrendDataPoint
+	err = s.db.Select(&relevanceTimeSeries, query, startDate, endDate, topicID, personID, groupID)
+	if err != nil {
+		log.Printf("Failed to get relevance time series: %v", err)
+		return nil, err
+	}
+	return relevanceTimeSeries, nil
+}
+
+func (s *AnalyticsService) GetPersonsWithSimilarSentiment(topicIDs []int, personID int, electionPeriod int, numOfPersons int) ([]api.Politician, error) {
+
+	query := `
+		WITH last_date_for_election_period AS (
+			SELECT MAX(date)::date as last_date FROM analysed_protocols WHERE election_period = $1
+		),
+		this_person_topics AS (
+			SELECT ta_this.topic_id, ta_this.avg_sentiment
+			FROM get_topic_analytics(
+				(SELECT last_date FROM last_date_for_election_period), 
+				30::int, 
+				NULL::int,
+				$2::int
+			) ta_this
+			WHERE ta_this.topic_id = ANY($3::int[])
+		),
+		similar_persons AS (
+			SELECT DISTINCT ta.person_id,
+				AVG(ABS(ta.avg_sentiment - tpt.avg_sentiment)) as avg_sentiment_diff
+			FROM get_topic_analytics_per_person(
+				(SELECT last_date FROM last_date_for_election_period), 
+				30::int, 
+				NULL::int
+			) ta
+			JOIN this_person_topics tpt ON ta.topic_id = tpt.topic_id
+			WHERE ta.person_id != $2::int
+				AND ta.topic_id = ANY($3::int[])
+			GROUP BY ta.person_id
+			HAVING AVG(ABS(ta.avg_sentiment - tpt.avg_sentiment)) < 0.2
+			ORDER BY avg_sentiment_diff ASC
+			LIMIT $4::int
+		)
+		SELECT 
+			p.id::text as id,
+			COALESCE(r.title, '') as name,
+			COALESCE(pg.name, '') as party
+		FROM similar_persons sp
+		JOIN persons p ON p.id = sp.person_id
+		JOIN roles r ON r.person_id = p.id AND r.election_period = $1
+		LEFT JOIN parliamentary_groups pg ON r.group_id = pg.id
+	`
+
+	var personsWithSimilarSentiment []api.Politician
+	err := s.db.Select(&personsWithSimilarSentiment, query, electionPeriod, personID, pq.Array(topicIDs), numOfPersons)
+	if err != nil {
+		log.Printf("Failed to get persons with similar sentiment: %v", err)
+		return nil, err
+	}
+
+	log.Printf("Found %d persons with similar sentiment for person %d", len(personsWithSimilarSentiment), personID)
+	return personsWithSimilarSentiment, nil
+}
+
+func (s *AnalyticsService) GetMaxElectionPeriod(personID int) (int, error) {
+	query := `
+		SELECT MAX(election_period) as max_election_period
+		FROM roles
+		WHERE person_id = $1
+	`
+	var maxElectionPeriod int
+	err := s.db.Get(&maxElectionPeriod, query, personID)
+	if err != nil {
+		log.Printf("Failed to get max election period: %v", err)
+		return 0, err
+	}
+	return maxElectionPeriod, nil
 }
 
 func (s *AnalyticsService) GetActivePoliticians(electionPeriod int, limit int, mostActive bool) ([]api.ActivePolitician, error) {

@@ -198,7 +198,7 @@ AS $$
     FROM counts;
 $$ LANGUAGE SQL STABLE;
 
-
+--TODO: If needed somewhere we can like with _per_person group by topic as well and make the attribute optional
 CREATE OR REPLACE FUNCTION get_topic_analytics_per_party(
     _week_date DATE,
     _limit INT,
@@ -225,6 +225,40 @@ WITH counts AS (
 )
 SELECT
     group_id,
+    (topic_count / NULLIF(total_count, 0))::float AS topic_relevance,
+    sentiment_agg::float AS avg_sentiment
+FROM counts;
+$$ LANGUAGE SQL STABLE;
+
+CREATE OR REPLACE FUNCTION get_topic_analytics_per_person(
+    _week_date DATE,
+    _limit INT,
+    _topic_id INT DEFAULT NULL
+)
+    RETURNS TABLE (
+        person_id INT,
+        topic_id INT,
+        topic_relevance FLOAT,
+        avg_sentiment FLOAT
+    )
+AS $$
+WITH counts AS (
+    SELECT
+        r.person_id,
+        am.topic_id,
+        COUNT(*)::float AS topic_count,
+        SUM(COUNT(*)) OVER () AS total_count,
+        AVG(am.sentiment_value)::float AS sentiment_agg
+    FROM activity_mappings am
+             JOIN activities a ON a.id = am.activity_id
+             JOIN roles r ON r.id = a.role_id
+    WHERE (_topic_id IS NULL OR am.topic_id = _topic_id)
+      AND a.protocol_id IN (SELECT id FROM get_last_x_protocols(_week_date, _limit))
+    GROUP BY r.person_id, am.topic_id
+)
+SELECT
+    person_id,
+    topic_id,
     (topic_count / NULLIF(total_count, 0))::float AS topic_relevance,
     sentiment_agg::float AS avg_sentiment
 FROM counts;
@@ -464,3 +498,45 @@ SELECT sppt.person_id, COALESCE(AVG(sppt.std_dev), 0.0) as volatility
 FROM std_dev_per_person_topic sppt
 GROUP BY sppt.person_id;
 $$ LANGUAGE SQL STABLE;
+
+
+CREATE OR REPLACE FUNCTION get_time_series_activity(
+    _start_date DATE,
+    _end_date DATE,
+    _person_id INT DEFAULT NULL,
+    _group_id INT DEFAULT NULL
+)
+RETURNS TABLE (
+    month_date DATE,
+    speech_count BIGINT
+) 
+LANGUAGE sql
+STABLE
+AS $$
+WITH month_series AS (
+    SELECT generate_series(
+        date_trunc('month', _start_date)::date, 
+        date_trunc('month', _end_date)::date, 
+        '1 month'::interval
+    )::date AS m_start
+),
+activity_counts AS (
+    SELECT
+        date_trunc('month', ap.date)::date AS m_start,
+        COUNT(a.id) AS total
+    FROM analysed_protocols ap
+    JOIN activities a ON a.protocol_id = ap.id
+    JOIN roles r ON r.id = a.role_id
+    WHERE ap.date BETWEEN _start_date AND _end_date
+      AND a.type LIKE 'Rede%'
+      AND (_person_id IS NULL OR r.person_id = _person_id)
+      AND (_group_id IS NULL OR r.group_id = _group_id)
+    GROUP BY m_start
+)
+SELECT
+    ms.m_start,
+    COALESCE(ac.total, 0)
+FROM month_series ms
+LEFT JOIN activity_counts ac ON ms.m_start = ac.m_start
+ORDER BY ms.m_start;
+$$;

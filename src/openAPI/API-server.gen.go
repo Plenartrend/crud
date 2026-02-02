@@ -264,13 +264,13 @@ type PoliticianDetail struct {
 	Name               *string                             `json:"name,omitempty"`
 
 	// NumSpeeches Number of speeches given by this politician
-	NumSpeeches *int          `json:"numSpeeches,omitempty"`
-	Party       *string       `json:"party,omitempty"`
-	Role        *string       `json:"role,omitempty"`
-	Similar     *[]string     `json:"similar,omitempty"`
-	Speeches    *[]FullSpeech `json:"speeches,omitempty"`
-	TopTopics   *[]TopTopic   `json:"topTopics,omitempty"`
-	Volatility  *string       `json:"volatility,omitempty"`
+	NumSpeeches *int             `json:"numSpeeches,omitempty"`
+	Party       *string          `json:"party,omitempty"`
+	Role        *string          `json:"role,omitempty"`
+	Similar     *[]string        `json:"similar,omitempty"`
+	Speeches    *[]SpeechSnippet `json:"speeches,omitempty"`
+	TopTopics   *[]TopTopic      `json:"topTopics,omitempty"`
+	Volatility  *string          `json:"volatility,omitempty"`
 }
 
 // PoliticianDetailContributionFactor Contribution factor level
@@ -350,8 +350,13 @@ type TimeRangeFilter string
 
 // TopTopic defines model for TopTopic.
 type TopTopic struct {
-	Stance *string `json:"stance,omitempty"`
-	Topic  *string `json:"topic,omitempty"`
+	// Sentiment Sentiment score for this topic (-1 to 1)
+	Sentiment *float32 `json:"sentiment,omitempty"`
+
+	// SpeechCount Number of speeches given on this topic
+	SpeechCount *int    `json:"speechCount,omitempty"`
+	Stance      *string `json:"stance,omitempty"`
+	Topic       *string `json:"topic,omitempty"`
 }
 
 // Topic defines model for Topic.
@@ -401,6 +406,9 @@ type TrendDataPoint struct {
 	Date  *string  `json:"date,omitempty"`
 	Value *float32 `json:"value,omitempty"`
 }
+
+// ElectionPeriodFilter defines model for ElectionPeriodFilter.
+type ElectionPeriodFilter = int
 
 // Offset defines model for Offset.
 type Offset = int
@@ -462,6 +470,15 @@ type GetPoliticiansMostActiveParams struct {
 	ElectionPeriod *int `form:"election_period,omitempty" json:"election_period,omitempty"`
 }
 
+// GetPoliticiansIdParams defines parameters for GetPoliticiansId.
+type GetPoliticiansIdParams struct {
+	// ElectionPeriod Filter by election period (Wahlperiode). If not provided, uses the most recent period for the politician.
+	ElectionPeriod *ElectionPeriodFilter `form:"election_period,omitempty" json:"election_period,omitempty"`
+
+	// TimeRange Time window for the time series. Omit for server default.
+	TimeRange *TimeRangeFilter `form:"time_range,omitempty" json:"time_range,omitempty"`
+}
+
 // GetSearchParams defines parameters for GetSearch.
 type GetSearchParams struct {
 	// Q The search query string.
@@ -511,7 +528,7 @@ type ServerInterface interface {
 	GetPoliticiansMostActive(w http.ResponseWriter, r *http.Request, params GetPoliticiansMostActiveParams)
 	// Get a specific politician
 	// (GET /politicians/{id})
-	GetPoliticiansId(w http.ResponseWriter, r *http.Request, id string)
+	GetPoliticiansId(w http.ResponseWriter, r *http.Request, id string, params GetPoliticiansIdParams)
 	// List all reports
 	// (GET /reports)
 	GetReports(w http.ResponseWriter, r *http.Request)
@@ -831,8 +848,27 @@ func (siw *ServerInterfaceWrapper) GetPoliticiansId(w http.ResponseWriter, r *ht
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPoliticiansIdParams
+
+	// ------------- Optional query parameter "election_period" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "election_period", r.URL.Query(), &params.ElectionPeriod)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "election_period", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "time_range" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "time_range", r.URL.Query(), &params.TimeRange)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "time_range", Err: err})
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetPoliticiansId(w, r, id)
+		siw.Handler.GetPoliticiansId(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {

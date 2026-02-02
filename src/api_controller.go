@@ -1,9 +1,7 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	api "plenartrend/crud/src/openAPI"
@@ -18,16 +16,21 @@ import (
 )
 
 type Server struct {
-	db               *sqlx.DB
-	analyticsService *service.AnalyticsService
+	db                  *sqlx.DB
+	analyticsService    *service.AnalyticsService
+	politiciansService  *service.PoliticiansService
 }
 
 func NewServer(db *sqlx.DB) *Server {
+	analyticsService := service.NewAnalyticsService(db)
 	return &Server{
-		db:               db,
-		analyticsService: service.NewAnalyticsService(db),
+		db:                 db,
+		analyticsService:   analyticsService,
+		politiciansService: service.NewPoliticiansService(db, analyticsService),
 	}
 }
+
+// Helper function to convert contribution factor string to API enum
 
 func (s *Server) GetHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
@@ -78,175 +81,6 @@ func (s *Server) GetDashboard(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func (s *Server) getPoliticians(electionPeriod *int, groupID *int, pageSize *int, offset int) ([]api.Politician, int, error) {
-	politicians := []api.Politician{}
-	log.Printf("Getting politicians for election period: %d, groupID: %v, pageSize: %d, offset: %d", electionPeriod, groupID, pageSize, offset)
-
-	// Default to latest election period if not specified
-	period := 21 //TODO: Fetch
-	if electionPeriod != nil {
-		period = *electionPeriod
-	}
-
-	// Query with pagination
-	query := (`
-		SELECT r.*, pg.name as faction_name
-		FROM roles r
-		LEFT JOIN parliamentary_groups pg ON r.group_id = pg.id
-		JOIN (
-			SELECT person_id, MIN(id) as min_id
-			FROM roles
-			WHERE election_period = $1
-			GROUP BY person_id
-		) r2
-		ON r.id = r2.min_id
-		WHERE r.election_period = $1
-		AND CASE WHEN $4::integer IS NOT NULL THEN r.group_id = $4::integer ELSE TRUE END
-		ORDER BY r.last_name, r.first_name
-		LIMIT CASE WHEN $2::integer IS NULL THEN NULL ELSE $2::integer END OFFSET CASE WHEN $2::integer IS NULL THEN 0 ELSE $3 END
-	`)
-
-	countQuery := (`
-		SELECT COUNT(r.*)
-		FROM roles r
-		LEFT JOIN parliamentary_groups pg ON r.group_id = pg.id
-		JOIN (
-			SELECT person_id, MIN(id) as min_id
-			FROM roles
-			WHERE election_period = $1
-			GROUP BY person_id
-		) r2
-		ON r.id = r2.min_id
-		WHERE r.election_period = $1
-		AND CASE WHEN $2::integer IS NOT NULL THEN r.group_id = $2::integer ELSE TRUE END
-	`)
-
-	var totalCount int
-	err := s.db.Get(&totalCount, s.db.Rebind(countQuery), period, groupID)
-	if err != nil {
-		log.Printf("Failed to count politicians: %v", err)
-		return nil, 0, err
-	}
-
-	log.Printf("Fetching politicians for election period: %d, groupID: %v, limit: %d, offset: %d", period, groupID, pageSize, offset)
-
-	type RoleWithFaction struct {
-		types.Role
-		FactionName sql.NullString `db:"faction_name"`
-	}
-
-	rolesWithFaction := []RoleWithFaction{}
-	err = s.db.Select(&rolesWithFaction, s.db.Rebind(query), period, pageSize, offset, groupID)
-	if err != nil {
-		log.Printf("Failed to query roles: %v", err)
-		return nil, 0, err
-	}
-
-	personIDs := make([]int, len(rolesWithFaction))
-	for i, roleWithFaction := range rolesWithFaction {
-		personIDs[i] = roleWithFaction.Role.PersonID
-	}
-
-	cfactors, err := s.analyticsService.GetContributionFactor(period, personIDs)
-	if err != nil {
-		log.Printf("Failed to get contribution factors: %v", err)
-		cfactors = make(map[int]service.ContributionFactor)
-	}
-
-	volatilities, err := s.analyticsService.GetVolatility(period, personIDs)
-	if err != nil {
-		log.Printf("Failed to get volatilities: %v", err)
-		volatilities = make(map[int]float64)
-	}
-
-	topTopicsMap, err := s.analyticsService.GetTopTopics(period, personIDs, 3)
-	if err != nil {
-		log.Printf("Failed to get top topics: %v", err)
-		topTopicsMap = make(map[int][]types.Topic)
-	}
-
-	speechCounts, err := s.analyticsService.GetNumberOfSpeeches(period, personIDs)
-	if err != nil {
-		log.Printf("Failed to get speech counts: %v", err)
-		speechCounts = make(map[int]int)
-	}
-
-	// Convert roles to politicians with analytics data
-	for _, roleWithFaction := range rolesWithFaction {
-		role := roleWithFaction.Role
-		personID := role.PersonID
-
-		// Get analytics data from maps with defaults
-		cfactor := cfactors[personID]
-		if cfactor == "" {
-			cfactor = "low"
-		}
-
-		volatility := volatilities[personID]
-		topTopics := topTopicsMap[personID]
-		if topTopics == nil {
-			topTopics = []types.Topic{}
-		}
-
-		numSpeeches := speechCounts[personID]
-
-		// Convert to API types (pointers)
-		idStr := strconv.Itoa(role.PersonID)
-		nameSuffix := ""
-		if role.NameSuffix.Valid && role.NameSuffix.String != "" {
-			nameSuffix = role.NameSuffix.String + " "
-		}
-		name := role.FirstName + " " + nameSuffix + role.LastName
-		party := ""
-		if roleWithFaction.FactionName.Valid {
-			party = roleWithFaction.FactionName.String
-		}
-		roleStr := ""
-		if role.RoleName.Valid {
-			roleStr = role.RoleName.String
-		}
-		volatilityStr := fmt.Sprintf("%.2f", volatility)
-
-		// Convert contribution factor to API enum type
-		cfactorStr := strings.ToLower(string(cfactor))
-		var apiContributionFactor api.PoliticianContributionFactor
-		switch cfactorStr {
-		case "high":
-			apiContributionFactor = api.PoliticianContributionFactorHigh
-		case "medium":
-			apiContributionFactor = api.PoliticianContributionFactorMedium
-		default:
-			apiContributionFactor = api.PoliticianContributionFactorLow
-		}
-
-		// Convert top topics to API format
-		apiTopTopics := make([]api.TopTopic, 0, len(topTopics))
-		for _, topic := range topTopics {
-			topicName := topic.Name
-			stance := "neutral" // We don't have stance data yet
-			apiTopTopics = append(apiTopTopics, api.TopTopic{
-				Topic:  &topicName,
-				Stance: &stance,
-			})
-		}
-
-		politician := api.Politician{
-			Id:                 &idStr,
-			Name:               &name,
-			Party:              &party,
-			Role:               &roleStr,
-			Volatility:         &volatilityStr,
-			ContributionFactor: &apiContributionFactor,
-			TopTopics:          &apiTopTopics,
-			NumSpeeches:        &numSpeeches,
-		}
-
-		politicians = append(politicians, politician)
-	}
-
-	return politicians, totalCount, nil
-}
-
 func (s *Server) GetPoliticians(w http.ResponseWriter, r *http.Request, params api.GetPoliticiansParams) {
 	log.Printf("GetPoliticians called with params: %+v", params)
 	log.Printf("Raw query string: %s", r.URL.RawQuery)
@@ -270,7 +104,7 @@ func (s *Server) GetPoliticians(w http.ResponseWriter, r *http.Request, params a
 		log.Printf("No group ID filter received")
 	}
 
-	politicians, totalCount, err := s.getPoliticians(electionPeriod, groupID, params.PageSize, offset)
+	politicians, totalCount, err := s.politiciansService.GetPoliticians(electionPeriod, groupID, params.PageSize, offset)
 	if err != nil {
 		log.Printf("Failed to query politicians: %v", err)
 		http.Error(w, "Failed to query politicians", http.StatusInternalServerError)
@@ -303,90 +137,46 @@ func (s *Server) GetPoliticians(w http.ResponseWriter, r *http.Request, params a
 	_ = json.NewEncoder(w).Encode(response)
 }
 
-func (s *Server) GetPoliticiansId(w http.ResponseWriter, r *http.Request, id string) {
-	// Query directly for single politician by ID
-	period := 21 // Default to current period
-
-	query := `
-		SELECT r.*, pg.name as faction_name
-		FROM roles r
-		LEFT JOIN parliamentary_groups pg ON r.group_id = pg.id
-		WHERE r.person_id = ? AND r.election_period = ?
-		LIMIT 1
-	`
-
-	type RoleWithFaction struct {
-		types.Role
-		FactionName sql.NullString `db:"faction_name"`
+func (s *Server) GetPoliticiansId(w http.ResponseWriter, r *http.Request, id string, params api.GetPoliticiansIdParams) {
+	log.Printf("GetPoliticiansId called with id=%s, params=%+v", id, params)
+	
+	personID, err := strconv.Atoi(id)
+	if err != nil {
+		log.Printf("Failed to convert ID to int: %v", err)
+		http.Error(w, "Failed to convert ID to int", http.StatusBadRequest)
+		return
 	}
 
-	var roleWithFaction RoleWithFaction
-	err := s.db.Get(&roleWithFaction, s.db.Rebind(query), id, period)
+	var electionPeriod int
+	if params.ElectionPeriod == nil {
+		log.Printf("No election period provided, fetching max for person %d", personID)
+		electionPeriod, err = s.analyticsService.GetMaxElectionPeriod(personID)
+		if err != nil {
+			log.Printf("Failed to get max election period: %v", err)
+			http.Error(w, "Failed to get max election period", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Using max election period: %d", electionPeriod)
+	} else {
+		electionPeriod = int(*params.ElectionPeriod)
+		log.Printf("Using provided election period: %d", electionPeriod)
+	}
+
+	timeRange := api.TimeRangeFilter("last_year")
+	if params.TimeRange != nil {
+		timeRange = *params.TimeRange
+	}
+
+	politicianDetail, err := s.politiciansService.GetPoliticianDetail(personID, electionPeriod, timeRange)
 	if err != nil {
-		log.Printf("Failed to query politician: %v", err)
+		log.Printf("Failed to get politician details: %v", err)
 		http.Error(w, "Politician not found", http.StatusNotFound)
 		return
 	}
 
-	role := roleWithFaction.Role
-
-	// Use batch methods with single ID
-	personIDs := []int{role.PersonID}
-
-	cfactors, err := s.analyticsService.GetContributionFactor(period, personIDs)
-	if err != nil {
-		log.Printf("Failed to get contribution factor: %v", err)
-		cfactors = make(map[int]service.ContributionFactor)
-	}
-	contributionFactor := cfactors[role.PersonID]
-	if contributionFactor == "" {
-		contributionFactor = "low"
-	}
-
-	volatilities, err := s.analyticsService.GetVolatility(period, personIDs)
-	if err != nil {
-		log.Printf("Failed to get volatility: %v", err)
-		volatilities = make(map[int]float64)
-	}
-	volatility := volatilities[role.PersonID]
-
-	// Convert to API types (pointers)
-	idStr := strconv.Itoa(role.PersonID)
-	name := role.FirstName + " " + role.LastName
-	party := ""
-	if roleWithFaction.FactionName.Valid {
-		party = roleWithFaction.FactionName.String
-	}
-	roleStr := ""
-	if role.RoleName.Valid {
-		roleStr = role.RoleName.String
-	}
-	volatilityStr := fmt.Sprintf("%.2f", volatility)
-
-	// Convert contribution factor to API enum type
-	contributionFactorStr := strings.ToLower(string(contributionFactor))
-	var apiContributionFactor api.PoliticianContributionFactor
-	switch contributionFactorStr {
-	case "high":
-		apiContributionFactor = api.PoliticianContributionFactorHigh
-	case "medium":
-		apiContributionFactor = api.PoliticianContributionFactorMedium
-	default:
-		apiContributionFactor = api.PoliticianContributionFactorLow
-	}
-
-	politician := api.Politician{
-		Id:                 &idStr,
-		Name:               &name,
-		Party:              &party,
-		Role:               &roleStr,
-		Volatility:         &volatilityStr,
-		ContributionFactor: &apiContributionFactor,
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(politician)
+	_ = json.NewEncoder(w).Encode(politicianDetail)
 }
 
 func (s *Server) GetElectionPeriods(w http.ResponseWriter, r *http.Request) {
@@ -437,7 +227,7 @@ func (s *Server) GetReports(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) GetSearch(w http.ResponseWriter, r *http.Request, params api.GetSearchParams) {
 	// Use nil page size to get all politicians for search
-	politicians, _, err := s.getPoliticians(nil, nil, nil, 0)
+	politicians, _, err := s.politiciansService.GetPoliticians(nil, nil, nil, 0)
 	if err != nil {
 		log.Printf("Failed to query politicians: %v", err)
 		http.Error(w, "Failed to query politicians", http.StatusInternalServerError)
@@ -656,7 +446,7 @@ func (s *Server) GetTopicsId(w http.ResponseWriter, r *http.Request, id string) 
 	}
 	log.Printf("Fetching topic with ID: %d", topicID)
 
-	topicDetail, err := s.analyticsService.GetTopicDetail(topicID)
+	topicDetail, err := s.analyticsService.GetTopicDetail(topicID, nil, nil)
 	if err != nil {
 		log.Printf("Failed to get topic detail: %v", err)
 		http.Error(w, "Failed to query topic", http.StatusInternalServerError)

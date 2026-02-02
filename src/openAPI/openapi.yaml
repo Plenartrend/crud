@@ -115,6 +115,8 @@ paths:
             type: string
           required: true
           description: The ID of the politician.
+        - $ref: '#/components/parameters/ElectionPeriodFilter'
+        - $ref: '#/components/parameters/TimeRangeFilter'
       responses:
         '200':
           description: Detailed politician information.
@@ -335,6 +337,14 @@ components:
         type: integer
         minimum: 0
         default: 0
+    ElectionPeriodFilter:
+      in: query
+      name: election_period
+      required: false
+      description: Filter by election period (Wahlperiode). If not provided, uses the most recent period for the politician.
+      schema:
+        type: integer
+        minimum: 1
     TimeRangeFilter:
       in: query
       name: time_range
@@ -490,6 +500,12 @@ components:
           type: string
         stance:
           type: string
+        sentiment:
+          type: number
+          description: Sentiment score for this topic (-1 to 1)
+        speechCount:
+          type: integer
+          description: Number of speeches given on this topic
 
     ElectionPeriod:
       type: object
@@ -663,7 +679,7 @@ components:
             speeches:
               type: array
               items:
-                $ref: '#/components/schemas/FullSpeech'
+                $ref: '#/components/schemas/SpeechSnippet'
             activityData:
               type: array
               items:
