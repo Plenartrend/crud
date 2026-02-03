@@ -190,12 +190,22 @@ AS $$
           AND (_group_id IS NULL OR r.group_id = _group_id)
           AND (_person_id IS NULL OR r.person_id = _person_id)
         GROUP BY am.topic_id
+    ),
+    relevances AS (
+        SELECT
+            topic_id,
+            (topic_count / NULLIF(total_count, 0))::float AS raw_relevance,
+            sentiment_agg::float AS avg_sentiment
+        FROM counts
     )
     SELECT
         topic_id,
-        (topic_count / NULLIF(total_count, 0))::float AS topic_relevance,
-        sentiment_agg::float AS avg_sentiment
-    FROM counts;
+        ROUND(
+            ((raw_relevance - MIN(raw_relevance) OVER()) /
+             NULLIF(MAX(raw_relevance) OVER() - MIN(raw_relevance) OVER(), 0) * 100)::numeric,
+            1)::float AS topic_relevance,
+        avg_sentiment
+    FROM relevances;
 $$ LANGUAGE SQL STABLE;
 
 --TODO: If needed somewhere we can like with _per_person group by topic as well and make the attribute optional
@@ -222,12 +232,22 @@ WITH counts AS (
     WHERE am.topic_id = _topic_id
       AND a.protocol_id IN (SELECT id FROM get_last_x_protocols(_week_date, _limit))
     GROUP BY r.group_id
+),
+relevances AS (
+    SELECT
+        group_id,
+        (topic_count / NULLIF(total_count, 0))::float AS raw_relevance,
+        sentiment_agg::float AS avg_sentiment
+    FROM counts
 )
 SELECT
     group_id,
-    (topic_count / NULLIF(total_count, 0))::float AS topic_relevance,
-    sentiment_agg::float AS avg_sentiment
-FROM counts;
+    ROUND(
+        ((raw_relevance - MIN(raw_relevance) OVER()) /
+         NULLIF(MAX(raw_relevance) OVER() - MIN(raw_relevance) OVER(), 0) * 100)::numeric,
+        1)::float AS topic_relevance,
+    avg_sentiment
+FROM relevances;
 $$ LANGUAGE SQL STABLE;
 
 CREATE OR REPLACE FUNCTION get_topic_analytics_per_person(
@@ -255,13 +275,24 @@ WITH counts AS (
     WHERE (_topic_id IS NULL OR am.topic_id = _topic_id)
       AND a.protocol_id IN (SELECT id FROM get_last_x_protocols(_week_date, _limit))
     GROUP BY r.person_id, am.topic_id
+),
+relevances AS (
+    SELECT
+        person_id,
+        topic_id,
+        (topic_count / NULLIF(total_count, 0))::float AS raw_relevance,
+        sentiment_agg::float AS avg_sentiment
+    FROM counts
 )
 SELECT
     person_id,
     topic_id,
-    (topic_count / NULLIF(total_count, 0))::float AS topic_relevance,
-    sentiment_agg::float AS avg_sentiment
-FROM counts;
+    ROUND(
+        ((raw_relevance - MIN(raw_relevance) OVER()) /
+         NULLIF(MAX(raw_relevance) OVER() - MIN(raw_relevance) OVER(), 0) * 100)::numeric,
+        1)::float AS topic_relevance,
+    avg_sentiment
+FROM relevances;
 $$ LANGUAGE SQL STABLE;
 
 
@@ -446,14 +477,27 @@ weekly_stats AS (
     FROM activity_data ad
     WHERE (_topic_id IS NULL OR ad.topic_id = _topic_id)
     GROUP BY ad.week_start
+),
+weekly_stats_with_totals AS (
+    SELECT
+        wst.week_start,
+        (wst.topic_count / NULLIF(wt.total_count, 0))::float AS raw_relevance,
+        wst.sentiment_agg
+    FROM weekly_stats wst
+    LEFT JOIN weekly_totals wt ON wst.week_start = wt.week_start
 )
 SELECT 
     ws.week_start AS week_date,
-    COALESCE((wst.topic_count / NULLIF(wt.total_count, 0))::float, 0.0) AS topic_relevance,
-    COALESCE(wst.sentiment_agg, 0.0) AS avg_sentiment
+    COALESCE(
+        ROUND(
+            ((wsr.raw_relevance - MIN(wsr.raw_relevance) OVER()) /
+             NULLIF(MAX(wsr.raw_relevance) OVER() - MIN(wsr.raw_relevance) OVER(), 0) * 100)::numeric,
+            1)::float,
+        0.0
+    ) AS topic_relevance,
+    COALESCE(wsr.sentiment_agg, 0.0) AS avg_sentiment
 FROM week_series ws
-LEFT JOIN weekly_stats wst ON ws.week_start = wst.week_start
-LEFT JOIN weekly_totals wt ON ws.week_start = wt.week_start
+LEFT JOIN weekly_stats_with_totals wsr ON ws.week_start = wsr.week_start
 ORDER BY ws.week_start ASC;
 
 $$ LANGUAGE SQL STABLE;

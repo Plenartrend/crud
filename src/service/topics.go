@@ -70,64 +70,6 @@ func (s *TopicsService) GetTopics(pageSize int, offset int) ([]api.Topic, int, e
 	return topic_result, totalItems, nil
 }
 
-func (s *TopicsService) GetAnalysisTimeSeries(timeRange api.TimeRangeFilter, topicID, personID, groupID *int) ([]api.AnalysisOverTimePoint, error) {
-	log.Printf("[Analytics] GetAnalysisTimeSeries called with timeRange=%s, topicID=%v, personID=%v, groupID=%v",
-		timeRange, topicID, personID, groupID)
-
-	// Calculate start and end dates for the time range
-	startDate, endDate, err := s.helpersService.GetDateRangeForTimeRange(string(timeRange), nil)
-	if err != nil {
-		log.Printf("[Analytics] ERROR: Failed to get date range: %v", err)
-		return nil, err
-	}
-	log.Printf("[Analytics] Date range: %s to %s", startDate.Format("2006-01-02"), endDate.Format("2006-01-02"))
-
-	// Call optimized SQL function that processes all weeks in one query
-	type TimeSeriesRow struct {
-		WeekDate       time.Time `db:"week_date"`
-		TopicRelevance float64   `db:"topic_relevance"`
-		AvgSentiment   float64   `db:"avg_sentiment"`
-	}
-
-	var rows []TimeSeriesRow
-	err = s.db.Select(&rows,
-		`SELECT * FROM get_time_series_analytics($1, $2, 20, $3, $4, $5)`,
-		startDate, endDate, topicID, personID, groupID)
-	if err != nil {
-		log.Printf("[Analytics] ERROR: Failed to query time series: %v", err)
-		return nil, err
-	}
-
-	log.Printf("[Analytics] Retrieved %d data points from SQL", len(rows))
-
-	// Convert SQL results to API response format
-	dataPoints := make([]api.AnalysisOverTimePoint, 0, len(rows))
-	for _, row := range rows {
-		period := openapi_types.Date{Time: row.WeekDate}
-		relevance := float32(row.TopicRelevance)
-		sentiment := float32(row.AvgSentiment)
-
-		dataPoints = append(dataPoints, api.AnalysisOverTimePoint{
-			Period:    &period,
-			Relevance: &relevance,
-			Sentiment: &sentiment,
-		})
-	}
-
-	if len(dataPoints) > 0 {
-		log.Printf("[Analytics] First point: date=%s, relevance=%.4f, sentiment=%.4f",
-			dataPoints[0].Period.Time.Format("2006-01-02"),
-			*dataPoints[0].Relevance,
-			*dataPoints[0].Sentiment)
-		log.Printf("[Analytics] Last point: date=%s, relevance=%.4f, sentiment=%.4f",
-			dataPoints[len(dataPoints)-1].Period.Time.Format("2006-01-02"),
-			*dataPoints[len(dataPoints)-1].Relevance,
-			*dataPoints[len(dataPoints)-1].Sentiment)
-	}
-
-	return dataPoints, nil
-}
-
 func (s *TopicsService) GetTopicDetail(topicID int, groupID *int, personID *int, electionPeriod *int) (*api.TopicDetail, error) {
 	dataQuery := `
 	    WITH last_date_for_election_period AS (
@@ -201,6 +143,64 @@ func (s *TopicsService) GetTopicDetail(topicID int, groupID *int, personID *int,
 	}
 
 	return &resp, nil
+}
+
+func (s *TopicsService) GetAnalysisTimeSeries(timeRange api.TimeRangeFilter, topicID, personID, groupID *int) ([]api.AnalysisOverTimePoint, error) {
+	log.Printf("[Analytics] GetAnalysisTimeSeries called with timeRange=%s, topicID=%v, personID=%v, groupID=%v",
+		timeRange, topicID, personID, groupID)
+
+	// Calculate start and end dates for the time range
+	startDate, endDate, err := s.helpersService.GetDateRangeForTimeRange(string(timeRange), nil)
+	if err != nil {
+		log.Printf("[Analytics] ERROR: Failed to get date range: %v", err)
+		return nil, err
+	}
+	log.Printf("[Analytics] Date range: %s to %s", startDate.Format("2006-01-02"), endDate.Format("2006-01-02"))
+
+	// Call optimized SQL function that processes all weeks in one query
+	type TimeSeriesRow struct {
+		WeekDate       time.Time `db:"week_date"`
+		TopicRelevance float64   `db:"topic_relevance"`
+		AvgSentiment   float64   `db:"avg_sentiment"`
+	}
+
+	var rows []TimeSeriesRow
+	err = s.db.Select(&rows,
+		`SELECT * FROM get_time_series_analytics($1, $2, 20, $3, $4, $5)`,
+		startDate, endDate, topicID, personID, groupID)
+	if err != nil {
+		log.Printf("[Analytics] ERROR: Failed to query time series: %v", err)
+		return nil, err
+	}
+
+	log.Printf("[Analytics] Retrieved %d data points from SQL", len(rows))
+
+	// Convert SQL results to API response format
+	dataPoints := make([]api.AnalysisOverTimePoint, 0, len(rows))
+	for _, row := range rows {
+		period := openapi_types.Date{Time: row.WeekDate}
+		relevance := float32(row.TopicRelevance)
+		sentiment := float32(row.AvgSentiment)
+
+		dataPoints = append(dataPoints, api.AnalysisOverTimePoint{
+			Period:    &period,
+			Relevance: &relevance,
+			Sentiment: &sentiment,
+		})
+	}
+
+	if len(dataPoints) > 0 {
+		log.Printf("[Analytics] First point: date=%s, relevance=%.4f, sentiment=%.4f",
+			dataPoints[0].Period.Time.Format("2006-01-02"),
+			*dataPoints[0].Relevance,
+			*dataPoints[0].Sentiment)
+		log.Printf("[Analytics] Last point: date=%s, relevance=%.4f, sentiment=%.4f",
+			dataPoints[len(dataPoints)-1].Period.Time.Format("2006-01-02"),
+			*dataPoints[len(dataPoints)-1].Relevance,
+			*dataPoints[len(dataPoints)-1].Sentiment)
+	}
+
+	return dataPoints, nil
 }
 
 func (s *TopicsService) getPartyPositions(topicID int) ([]api.PartyPosition, error) {
