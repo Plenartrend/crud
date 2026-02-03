@@ -41,9 +41,9 @@ func (s *TopicsService) GetSpeechSnippets(topicID *int, personID *int, groupId *
 		FROM activities a
 		JOIN activity_mappings am ON am.activity_id = a.id
 		JOIN roles r ON r.id = a.role_id
-		JOIN protocols p ON p.id = a.protocol_id
+		JOIN protocols p ON p.id = a.protocol_id JOIN topics t ON t.id = am.topic_id JOIN topic_clusters c ON c.id = t.cluster_id
 		LEFT JOIN parliamentary_groups pg ON pg.id = r.group_id
-		WHERE ($1::int IS NULL OR am.topic_id = $1::int)
+		WHERE ($1::int IS NULL OR c.id = $1::int)
 		AND ($2::int IS NULL OR r.person_id = $2::int)
 		AND ($3::int IS NULL OR r.group_id = $3::int)
 		AND ($4::int IS NULL OR p.election_period = $4::int)

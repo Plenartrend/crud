@@ -585,18 +585,19 @@ func (s *PoliticiansService) GetTopTopics(electionPeriod int, personIDs []int, n
 	log.Printf("Getting top topics for %d persons in election period %d", len(personIDs), electionPeriod)
 	query := `
 		WITH top_topics AS (
-			SELECT r.person_id, am.topic_id, COUNT(*) AS activity_count,
+			SELECT r.person_id, c.id as cluster_id, COUNT(*) AS activity_count,
 				   ROW_NUMBER() OVER (PARTITION BY r.person_id ORDER BY COUNT(*) DESC) as rn
 			FROM activity_mappings am
 			JOIN activities a ON a.id = am.activity_id
 			JOIN roles r ON r.id = a.role_id
 			JOIN protocols p ON p.id = a.protocol_id
+			JOIN topics t ON t.id = am.topic_id JOIN topic_clusters c ON c.id = t.cluster_id
 			WHERE r.person_id = ANY($1) AND p.election_period = $2
-			GROUP BY r.person_id, am.topic_id
+			GROUP BY r.person_id, c.id
 		)
-		SELECT tt.person_id, t.id, t.name, t.updated, t.created
+		SELECT tt.person_id, c.id, c.title as name, c.updated, c.created
 		FROM top_topics tt
-		JOIN topics t ON t.id = tt.topic_id
+		JOIN topic_clusters c ON c.id = tt.cluster_id
 		WHERE tt.rn <= $3
 		ORDER BY tt.person_id, tt.rn
 	`
@@ -631,14 +632,14 @@ func (s *PoliticiansService) GetPoliticiansWithSimilarSentiment(topicIDs []int, 
 			SELECT MAX(date)::date as last_date FROM analysed_protocols WHERE election_period = $1
 		),
 		this_person_topics AS (
-			SELECT ta_this.topic_id, ta_this.avg_sentiment
+			SELECT ta_this.cluster_id, ta_this.avg_sentiment
 			FROM get_topic_analytics(
 				(SELECT last_date FROM last_date_for_election_period), 
 				30::int, 
 				NULL::int,
 				$2::int
 			) ta_this
-			WHERE ta_this.topic_id = ANY($3::int[])
+			WHERE ta_this.cluster_id = ANY($3::int[])
 		),
 		similar_persons AS (
 			SELECT DISTINCT ta.person_id,
@@ -648,9 +649,9 @@ func (s *PoliticiansService) GetPoliticiansWithSimilarSentiment(topicIDs []int, 
 				30::int, 
 				NULL::int
 			) ta
-			JOIN this_person_topics tpt ON ta.topic_id = tpt.topic_id
+			JOIN this_person_topics tpt ON ta.cluster_id = tpt.cluster_id
 			WHERE ta.person_id != $2::int
-				AND ta.topic_id = ANY($3::int[])
+				AND ta.cluster_id = ANY($3::int[])
 			GROUP BY ta.person_id
 			HAVING AVG(ABS(ta.avg_sentiment - tpt.avg_sentiment)) < 0.2
 			ORDER BY avg_sentiment_diff ASC

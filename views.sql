@@ -171,29 +171,31 @@ CREATE OR REPLACE FUNCTION get_topic_analytics(
     _person_id INT DEFAULT NULL
 )
 RETURNS TABLE (
-    topic_id INT, 
+    cluster_id INT, 
     topic_relevance FLOAT, 
     avg_sentiment FLOAT
 ) 
 AS $$
     WITH counts AS (
         SELECT
-            am.topic_id,
+            c.id as cluster_id,
             COUNT(*)::float AS topic_count,
             SUM(COUNT(*)) OVER () AS total_count,
             AVG(am.sentiment_value)::float AS sentiment_agg
         FROM activity_mappings am
         JOIN activities a ON a.id = am.activity_id
-        JOIN roles r ON r.id = a.role_id
-        WHERE am.topic_id IS NOT NULL
-          AND a.protocol_id IN (SELECT id FROM get_last_x_protocols(_week_date, _limit))
+        JOIN roles r ON r.id = a.role_id JOIN topics t ON t.id = am.topic_id JOIN topic_clusters c ON c.id = t.cluster_id
+          WHERE a.protocol_id IN (SELECT id FROM get_last_x_protocols(_week_date, _limit))
           AND (_group_id IS NULL OR r.group_id = _group_id)
           AND (_person_id IS NULL OR r.person_id = _person_id)
-        GROUP BY am.topic_id
+        GROUP BY c.id
     )
     SELECT
-        topic_id,
-        (topic_count / NULLIF(total_count, 0))::float AS topic_relevance,
+        cluster_id,
+        LEAST(
+                ROUND(((topic_count / NULLIF(total_count, 0)) * 1000)::numeric, 2),
+                100
+        )::float AS topic_relevance,
         sentiment_agg::float AS avg_sentiment
     FROM counts;
 $$ LANGUAGE SQL STABLE;
@@ -202,7 +204,7 @@ $$ LANGUAGE SQL STABLE;
 CREATE OR REPLACE FUNCTION get_topic_analytics_per_party(
     _week_date DATE,
     _limit INT,
-    _topic_id INT
+    _cluster_id INT
 )
     RETURNS TABLE (
         group_id INT,
@@ -219,13 +221,17 @@ WITH counts AS (
     FROM activity_mappings am
              JOIN activities a ON a.id = am.activity_id
              JOIN roles r ON r.id = a.role_id
-    WHERE am.topic_id = _topic_id
+             JOIN topics t ON t.id = am.topic_id JOIN topic_clusters c ON c.id = t.cluster_id
+    WHERE c.id = _cluster_id
       AND a.protocol_id IN (SELECT id FROM get_last_x_protocols(_week_date, _limit))
     GROUP BY r.group_id
 )
 SELECT
     group_id,
-    (topic_count / NULLIF(total_count, 0))::float AS topic_relevance,
+    LEAST(
+                ROUND(((topic_count / NULLIF(total_count, 0)) * 1000)::numeric, 2),
+                100
+        )::float AS topic_relevance,
     sentiment_agg::float AS avg_sentiment
 FROM counts;
 $$ LANGUAGE SQL STABLE;
@@ -233,11 +239,11 @@ $$ LANGUAGE SQL STABLE;
 CREATE OR REPLACE FUNCTION get_topic_analytics_per_person(
     _week_date DATE,
     _limit INT,
-    _topic_id INT DEFAULT NULL
+    _cluster_id INT DEFAULT NULL
 )
     RETURNS TABLE (
         person_id INT,
-        topic_id INT,
+        cluster_id INT,
         topic_relevance FLOAT,
         avg_sentiment FLOAT
     )
@@ -245,21 +251,25 @@ AS $$
 WITH counts AS (
     SELECT
         r.person_id,
-        am.topic_id,
+        c.id as cluster_id,
         COUNT(*)::float AS topic_count,
         SUM(COUNT(*)) OVER () AS total_count,
         AVG(am.sentiment_value)::float AS sentiment_agg
     FROM activity_mappings am
              JOIN activities a ON a.id = am.activity_id
              JOIN roles r ON r.id = a.role_id
-    WHERE (_topic_id IS NULL OR am.topic_id = _topic_id)
+             JOIN topics t ON t.id = am.topic_id JOIN topic_clusters c ON c.id = t.cluster_id
+    WHERE (_cluster_id IS NULL OR c.id = _cluster_id)
       AND a.protocol_id IN (SELECT id FROM get_last_x_protocols(_week_date, _limit))
-    GROUP BY r.person_id, am.topic_id
+    GROUP BY r.person_id, c.id
 )
 SELECT
     person_id,
-    topic_id,
-    (topic_count / NULLIF(total_count, 0))::float AS topic_relevance,
+    cluster_id,
+    LEAST(
+                ROUND(((topic_count / NULLIF(total_count, 0)) * 1000)::numeric, 2),
+                100
+        )::float AS topic_relevance,
     sentiment_agg::float AS avg_sentiment
 FROM counts;
 $$ LANGUAGE SQL STABLE;
@@ -273,7 +283,7 @@ CREATE OR REPLACE FUNCTION get_most_active(
     _week_date DATE,
     _limit INT,
     _num_of_politicians_per_side INT,
-    _topic_id INT DEFAULT NULL
+    _cluster_id INT DEFAULT NULL
 )
 RETURNS TABLE (
     person_id INT,
@@ -288,8 +298,8 @@ RETURNS TABLE (
             AVG(am.sentiment_value)::float AS avg_sentiment
         FROM activity_mappings am
         JOIN activities a ON a.id = am.activity_id
-        JOIN roles r ON r.id = a.role_id
-        WHERE am.topic_id = _topic_id
+        JOIN roles r ON r.id = a.role_id JOIN topics t ON t.id = am.topic_id JOIN topic_clusters c ON c.id = t.cluster_id
+        WHERE c.id = _cluster_id
           AND a.protocol_id IN (SELECT id FROM get_last_x_protocols(_week_date, _limit))
         GROUP BY r.person_id
     ),
@@ -384,76 +394,82 @@ CREATE OR REPLACE FUNCTION get_time_series_analytics(
     _start_date DATE,
     _end_date DATE,
     _lookback_limit INT DEFAULT 20,
-    _topic_id INT DEFAULT NULL,
+    _cluster_id INT DEFAULT NULL,
     _person_id INT DEFAULT NULL,
     _group_id INT DEFAULT NULL
 )
-RETURNS TABLE (
-    week_date DATE,
-    topic_relevance FLOAT,
-    avg_sentiment FLOAT
-) 
+    RETURNS TABLE (
+                      week_date DATE,
+                      topic_relevance FLOAT,
+                      avg_sentiment FLOAT
+                  )
 AS $$
 WITH week_series AS (
     -- Generate all Monday dates (start of ISO weeks) in the range
     SELECT date_trunc('week', d)::date AS week_start
     FROM generate_series(_start_date, _end_date, '1 week'::interval) AS d
 ),
-protocols_per_week AS (
-    -- For each week, find the protocols to include (last _lookback_limit protocols up to that week)
-    SELECT 
-        ws.week_start,
-        p.id AS protocol_id
-    FROM week_series ws
-    CROSS JOIN LATERAL (
-        SELECT id, date
-        FROM analysed_protocols
-        WHERE date_trunc('week', date) <= ws.week_start
-        ORDER BY date DESC
-        LIMIT _lookback_limit
-    ) p
-),
-activity_data AS (
-    -- Get all relevant activity mappings for the protocols in our window
-    SELECT 
-        pw.week_start,
-        am.topic_id,
-        am.sentiment_value,
-        r.person_id,
-        r.group_id
-    FROM protocols_per_week pw
-    JOIN activities a ON a.protocol_id = pw.protocol_id
-    JOIN activity_mappings am ON am.activity_id = a.id
-    JOIN roles r ON r.id = a.role_id
-    WHERE am.topic_id IS NOT NULL
-      AND (_person_id IS NULL OR r.person_id = _person_id)
-      AND (_group_id IS NULL OR r.group_id = _group_id)
-),
-weekly_totals AS (
-    -- Calculate total activity count per week (across all topics)
-    SELECT 
-        ad.week_start,
-        COUNT(*)::float AS total_count
-    FROM activity_data ad
-    GROUP BY ad.week_start
-),
-weekly_stats AS (
-    -- Calculate topic-specific counts and sentiment per week
-    SELECT 
-        ad.week_start,
-        COUNT(*)::float AS topic_count,
-        AVG(ad.sentiment_value)::float AS sentiment_agg
-    FROM activity_data ad
-    WHERE (_topic_id IS NULL OR ad.topic_id = _topic_id)
-    GROUP BY ad.week_start
-)
-SELECT 
+     protocols_per_week AS (
+         -- For each week, find the protocols to include (last _lookback_limit protocols up to that week)
+         SELECT
+             ws.week_start,
+             p.id AS protocol_id
+         FROM week_series ws
+                  CROSS JOIN LATERAL (
+             SELECT id, date
+             FROM analysed_protocols
+             WHERE date_trunc('week', date) <= ws.week_start
+             ORDER BY date DESC
+             LIMIT _lookback_limit
+             ) p
+     ),
+     activity_data AS (
+         -- Get all relevant activity mappings for the protocols in our window
+         SELECT
+             pw.week_start,
+             c.id as cluster_id,
+             am.sentiment_value,
+             r.person_id,
+             r.group_id
+         FROM protocols_per_week pw
+                  JOIN activities a ON a.protocol_id = pw.protocol_id
+                  JOIN activity_mappings am ON am.activity_id = a.id
+                  JOIN roles r ON r.id = a.role_id
+                  JOIN topics t ON t.id = am.topic_id JOIN topic_clusters c ON c.id = t.cluster_id
+           WHERE (_person_id IS NULL OR r.person_id = _person_id)
+           AND (_group_id IS NULL OR r.group_id = _group_id)
+     ),
+     weekly_totals AS (
+         -- Calculate total activity count per week (across all topics)
+         SELECT
+             ad.week_start,
+             COUNT(*)::float AS total_count
+         FROM activity_data ad
+         GROUP BY ad.week_start
+     ),
+     weekly_stats AS (
+         -- Calculate topic-specific counts and sentiment per week
+         SELECT
+             ad.week_start,
+             COUNT(*)::float AS topic_count,
+             AVG(ad.sentiment_value)::float AS sentiment_agg
+         FROM activity_data ad
+         WHERE (_cluster_id IS NULL OR ad.cluster_id = _cluster_id)
+         GROUP BY ad.week_start
+     )
+SELECT
     ws.week_start AS week_date,
-    COALESCE((wst.topic_count / NULLIF(wt.total_count, 0))::float, 0.0) AS topic_relevance,
+    LEAST(
+        COALESCE(
+            ROUND(((wst.topic_count / NULLIF(wt.total_count, 0)) * 1000)::numeric, 2),
+            0 -- Default to 0 if data is missing
+        ),
+        100
+    )::float AS topic_relevance,
     COALESCE(wst.sentiment_agg, 0.0) AS avg_sentiment
 FROM week_series ws
-LEFT JOIN weekly_stats wst ON ws.week_start = wst.week_start
-LEFT JOIN weekly_totals wt ON ws.week_start = wt.week_start
+         LEFT JOIN weekly_stats wst ON ws.week_start = wst.week_start
+         LEFT JOIN weekly_totals wt ON ws.week_start = wt.week_start
 ORDER BY ws.week_start ASC;
 
 $$ LANGUAGE SQL STABLE;
@@ -474,7 +490,7 @@ CREATE OR REPLACE FUNCTION get_volatility_for_election_period(
     _election_period INT,
     _person_ids INT[] DEFAULT NULL,
     _group_id INT DEFAULT NULL,
-    _topic_id INT DEFAULT NULL
+    _cluster_id INT DEFAULT NULL
 )
     RETURNS TABLE (
                       person_id INT,
@@ -482,16 +498,17 @@ CREATE OR REPLACE FUNCTION get_volatility_for_election_period(
                   )
 AS $$
 WITH std_dev_per_person_topic AS (
-    SELECT r.person_id, am.topic_id, stddev_pop(am.sentiment_value) as std_dev
+    SELECT r.person_id, c.id as cluster_id, stddev_pop(am.sentiment_value) as std_dev
     FROM activity_mappings am 
     JOIN activities a ON a.id = am.activity_id
     JOIN roles r ON r.id = a.role_id 
     JOIN protocols p ON p.id = a.protocol_id
+    JOIN topics t ON t.id = am.topic_id JOIN topic_clusters c ON c.id = t.cluster_id
     WHERE p.election_period = _election_period
       AND (_person_ids IS NULL OR r.person_id = ANY(_person_ids))
       AND (_group_id IS NULL OR r.group_id = _group_id)
-      AND (_topic_id IS NULL OR am.topic_id = _topic_id)
-    GROUP BY r.person_id, am.topic_id
+      AND (_cluster_id IS NULL OR c.id = _cluster_id)
+    GROUP BY r.person_id, c.id
     HAVING COUNT(*) > 1
 )
 SELECT sppt.person_id, COALESCE(AVG(sppt.std_dev), 0.0) as volatility
