@@ -313,6 +313,8 @@ func (p *PartyService) GetPrintedPapersForParty(partyID int, electionPeriod int)
 				AND r.group_id = $1
 				AND r.election_period = $2
 		)
+		ORDER BY pp.date DESC
+		LIMIT 8
 	`, partyID, electionPeriod)
 
 	if err != nil {
