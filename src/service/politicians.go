@@ -345,13 +345,22 @@ func (s *PoliticiansService) GetSimilarPoliticians(personID int, electionPeriod 
 			log.Printf("Failed to get topic detail: %v", err)
 			continue
 		}
-		topTopicsWithSentiment[topic.ID] = *topicDetail
+		// Only include topics with a sentiment value
+		if topicDetail.Sentiment != nil {
+			topTopicsWithSentiment[topic.ID] = *topicDetail
+		}
 	}
 
 	// Extract topic IDs for similar sentiment query
 	topicIDsForSimilar := make([]int, 0, len(topTopicsWithSentiment))
 	for topicID := range topTopicsWithSentiment {
 		topicIDsForSimilar = append(topicIDsForSimilar, topicID)
+	}
+
+	// If there are no topics with sentiment, we can't find similar politicians
+	if len(topicIDsForSimilar) == 0 {
+		log.Printf("No topics with sentiment found for person %d, cannot find similar politicians", personID)
+		return []api.Politician{}, nil
 	}
 
 	similar, err := s.GetPoliticiansWithSimilarSentiment(topicIDsForSimilar, personID, electionPeriod, 4)
