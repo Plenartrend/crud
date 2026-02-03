@@ -302,6 +302,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/PageSize'
         - $ref: '#/components/parameters/Offset'
+        - in: query
+          name: topic_id
+          schema:
+            type: integer
+          description: Filter speeches by topic ID.
       responses:
         '200':
           description: Paginated list of speeches.

@@ -346,7 +346,15 @@ func (s *Server) GetSpeeches(w http.ResponseWriter, r *http.Request, params api.
 		limit = *params.PageSize
 	}
 
-	speeches, totalCount, err := s.speechesService.GetSpeeches(limit, offset)
+	var topicID *int
+	if tIDStr := r.URL.Query().Get("topic_id"); tIDStr != "" {
+		tID, err := strconv.Atoi(tIDStr)
+		if err == nil {
+			topicID = &tID
+		}
+	}
+
+	speeches, totalCount, err := s.speechesService.GetSpeeches(limit, offset, topicID)
 	if err != nil {
 		log.Printf("Failed to query speeches: %v", err)
 		http.Error(w, "Failed to query speeches", http.StatusInternalServerError)

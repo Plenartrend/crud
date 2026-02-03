@@ -657,6 +657,9 @@ type GetSpeechesParams struct {
 
 	// Offset Number of items to skip (for pagination). Default is 0.
 	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// TopicId Filter speeches by topic ID.
+	TopicId *int `form:"topic_id,omitempty" json:"topic_id,omitempty"`
 }
 
 // GetTopicsParams defines parameters for GetTopics.
@@ -1360,6 +1363,14 @@ func (siw *ServerInterfaceWrapper) GetSpeeches(w http.ResponseWriter, r *http.Re
 	err = runtime.BindQueryParameter("form", true, false, "offset", r.URL.Query(), &params.Offset)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "topic_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "topic_id", r.URL.Query(), &params.TopicId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "topic_id", Err: err})
 		return
 	}
 

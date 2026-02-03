@@ -109,7 +109,7 @@ func (s *TopicsService) GetSpeechSnippets(topicID *int, personID *int, groupId *
 	return speeches, nil
 }
 
-func (s *SpeechesService) GetSpeeches(limit, offset int) ([]api.Speech, int, error) {
+func (s *SpeechesService) GetSpeeches(limit, offset int, topicID *int) ([]api.Speech, int, error) {
 	type speechRow struct {
 		Id            string     `db:"id"`
 		Type          *string    `db:"type"`
@@ -132,10 +132,12 @@ func (s *SpeechesService) GetSpeeches(limit, offset int) ([]api.Speech, int, err
 		JOIN protocols p ON a.protocol_id = p.id
 		JOIN roles r on r.id = a.role_id
 		JOIN parliamentary_groups pg on pg.id = r.group_id
+		LEFT JOIN activity_mappings am on am.activity_id = a.id
 		WHERE a.text IS NOT NULL
 		  AND a.text != ''
 		  AND a.type LIKE 'Rede%'
-	`)
+		  AND ($1::int IS NULL OR am.topic_id = $1::int)
+	`, topicID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -164,9 +166,10 @@ func (s *SpeechesService) GetSpeeches(limit, offset int) ([]api.Speech, int, err
 		WHERE a.text IS NOT NULL
 		  AND a.text != ''
 		  AND a.type LIKE 'Rede%'
+		  AND ($3::int IS NULL OR am.topic_id = $3::int)
 		ORDER BY p.date DESC
 		LIMIT $1 OFFSET $2
-	`, limit, offset)
+	`, limit, offset, topicID)
 
 	if err != nil {
 		return nil, 0, err
