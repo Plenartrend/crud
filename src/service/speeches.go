@@ -123,6 +123,7 @@ func (s *SpeechesService) GetSpeeches(limit, offset int, topicID *int) ([]api.Sp
 		TopicCategory *string    `db:"topic.Category"`
 		Session       *string    `db:"session"`
 		Publisher     *string    `db:"publisher"`
+		Sentiment     string     `db:"sentiment"`
 	}
 
 	var totalCount int
@@ -156,7 +157,15 @@ func (s *SpeechesService) GetSpeeches(limit, offset int, topicID *int) ([]api.Sp
 			coalesce(am.topic_id, -1) as "topic.id",
 			coalesce(t.name, '') as "topic.Category",
 			p.document_number as session,
-			p.publisher as publisher
+			p.publisher as publisher,
+			CASE
+			    WHEN am.sentiment_value <= -0.6 THEN 'stark negativ'
+			    WHEN am.sentiment_value <= -0.2 THEN 'negativ'	
+			    WHEN am.sentiment_value <=  0.2 THEN 'neutral'
+			    WHEN am.sentiment_value <=  0.6 THEN 'positiv'
+			    WHEN am.sentiment_value > 0.6 THEN 'stark positiv'
+				ELSE 'unbekannt'
+			END as sentiment
 		FROM activities a
 		JOIN protocols p ON a.protocol_id = p.id
 		JOIN roles r on r.id = a.role_id
@@ -208,6 +217,7 @@ func (s *SpeechesService) GetSpeeches(limit, offset int, topicID *int) ([]api.Sp
 			},
 			Session:   row.Session,
 			Publisher: row.Publisher,
+			Sentiment: &row.Sentiment,
 		}
 	}
 

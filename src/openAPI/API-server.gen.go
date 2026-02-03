@@ -416,6 +416,7 @@ type Speech struct {
 	Date      time.Time     `json:"date"`
 	Id        string        `json:"id"`
 	Publisher *string       `json:"publisher,omitempty"`
+	Sentiment *string       `json:"sentiment,omitempty"`
 	Session   *string       `json:"session,omitempty"`
 	Speaker   PoliticianRef `json:"speaker"`
 	Title     string        `json:"title"`
