@@ -287,7 +287,7 @@ func (s *Server) GetSearch(w http.ResponseWriter, r *http.Request, params api.Ge
 		}
 	}
 
-	topics, err := s.getTopics(nil)
+	topics, _, err := s.topicsService.GetTopics(10000, 0)
 	if err != nil {
 		log.Printf("Failed to query topics: %v", err)
 		http.Error(w, "Failed to query topics", http.StatusInternalServerError)
@@ -312,26 +312,6 @@ func (s *Server) GetSearch(w http.ResponseWriter, r *http.Request, params api.Ge
 		Topics:      &filteredTopics,
 	}
 	_ = json.NewEncoder(w).Encode(searchResults)
-}
-
-func (s *Server) getTopics(id *int) ([]api.Topic, error) {
-	topics := []api.Topic{}
-	idSelector := ""
-	if id != nil {
-		idSelector = " WHERE id = " + strconv.Itoa(*id)
-	}
-	err := s.db.Select(&topics, `
-		SELECT
-			null as category,
-			id as id,
-			null as relevance,
-			name as title,
-			null as sentiment,
-			null as trend
-		FROM topics
-		`+idSelector+`
-	`)
-	return topics, err
 }
 
 func (s *Server) GetSpeeches(w http.ResponseWriter, r *http.Request, params api.GetSpeechesParams) {
