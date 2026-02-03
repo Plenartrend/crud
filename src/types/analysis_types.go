@@ -9,8 +9,8 @@ import (
 type TopicWithAnalytics struct {
 	ID             int       `db:"id"`
 	Name           string    `db:"name"`
-	TopicRelevance float64   `db:"topic_relevance"` // DB column from get_topic_analytics is topic_relevance
-	AvgSentiment   float64   `db:"avg_sentiment"`
+	TopicRelevance sql.NullFloat64   `db:"topic_relevance"` // DB column from get_topic_analytics is topic_relevance
+	AvgSentiment   sql.NullFloat64   `db:"avg_sentiment"`
 	Updated        time.Time `db:"updated"`
 	Created        time.Time `db:"created"`
 }

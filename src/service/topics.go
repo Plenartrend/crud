@@ -66,8 +66,13 @@ func (s *TopicsService) GetTopics(pageSize int, offset int, search *string) ([]a
 	topic_result := make([]api.Topic, 0, len(rows))
 	for _, row := range rows {
 		idStr := strconv.Itoa(row.ID)
-		rel := float32(row.TopicRelevance)
-		sent := float32(row.AvgSentiment)
+		var rel, sent float32
+		if row.TopicRelevance.Valid {
+			rel = float32(row.TopicRelevance.Float64)
+		}
+		if row.AvgSentiment.Valid {
+			sent = float32(row.AvgSentiment.Float64)
+		}
 		topic_result = append(topic_result, api.Topic{
 			Id:        &idStr,
 			Title:     &row.Name,
@@ -104,8 +109,13 @@ func (s *TopicsService) GetTopicDetail(topicID int, groupID *int, personID *int,
 		topicWithAnalytics.Name, topicWithAnalytics.ID, topicWithAnalytics.TopicRelevance, topicWithAnalytics.AvgSentiment)
 
 	idStr := strconv.Itoa(topicWithAnalytics.ID)
-	relevance := float32(topicWithAnalytics.TopicRelevance)
-	sentiment := float32(topicWithAnalytics.AvgSentiment)
+	var relevance, sentiment float32
+	if topicWithAnalytics.TopicRelevance.Valid {
+		relevance = float32(topicWithAnalytics.TopicRelevance.Float64)
+	}
+	if topicWithAnalytics.AvgSentiment.Valid {
+		sentiment = float32(topicWithAnalytics.AvgSentiment.Float64)
+	}
 	t := api.Topic{
 		Id:        &idStr,
 		Title:     &topicWithAnalytics.Name,
