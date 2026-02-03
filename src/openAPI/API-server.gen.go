@@ -59,6 +59,16 @@ const (
 	PoliticianDetailContributionFactorMedium PoliticianDetailContributionFactor = "medium"
 )
 
+// Defines values for SpeechSentiment.
+const (
+	SpeechSentimentNegativ      SpeechSentiment = "negativ"
+	SpeechSentimentNeutral      SpeechSentiment = "neutral"
+	SpeechSentimentPositiv      SpeechSentiment = "positiv"
+	SpeechSentimentStarkNegativ SpeechSentiment = "stark negativ"
+	SpeechSentimentStarkPositiv SpeechSentiment = "stark positiv"
+	SpeechSentimentUnbekannt    SpeechSentiment = "unbekannt"
+)
+
 // Defines values for SpeechDetailSentiment.
 const (
 	SpeechDetailSentimentNegativ      SpeechDetailSentiment = "negativ"
@@ -71,11 +81,11 @@ const (
 
 // Defines values for SpeechSnippetSentiment.
 const (
-	Negativ      SpeechSnippetSentiment = "negativ"
-	Neutral      SpeechSnippetSentiment = "neutral"
-	Positiv      SpeechSnippetSentiment = "positiv"
-	StarkNegativ SpeechSnippetSentiment = "stark negativ"
-	StarkPositiv SpeechSnippetSentiment = "stark positiv"
+	SpeechSnippetSentimentNegativ      SpeechSnippetSentiment = "negativ"
+	SpeechSnippetSentimentNeutral      SpeechSnippetSentiment = "neutral"
+	SpeechSnippetSentimentPositiv      SpeechSnippetSentiment = "positiv"
+	SpeechSnippetSentimentStarkNegativ SpeechSnippetSentiment = "stark negativ"
+	SpeechSnippetSentimentStarkPositiv SpeechSnippetSentiment = "stark positiv"
 )
 
 // Defines values for TimeRangeFilter.
@@ -413,16 +423,19 @@ type SessionStatus struct {
 
 // Speech defines model for Speech.
 type Speech struct {
-	Date      time.Time     `json:"date"`
-	Id        string        `json:"id"`
-	Publisher *string       `json:"publisher,omitempty"`
-	Sentiment *string       `json:"sentiment,omitempty"`
-	Session   *string       `json:"session,omitempty"`
-	Speaker   PoliticianRef `json:"speaker"`
-	Title     string        `json:"title"`
-	Topic     *TopicRef     `json:"topic,omitempty"`
-	Type      string        `json:"type"`
+	Date      time.Time        `json:"date"`
+	Id        string           `json:"id"`
+	Publisher *string          `json:"publisher,omitempty"`
+	Sentiment *SpeechSentiment `json:"sentiment,omitempty"`
+	Session   *string          `json:"session,omitempty"`
+	Speaker   PoliticianRef    `json:"speaker"`
+	Title     string           `json:"title"`
+	Topic     *TopicRef        `json:"topic,omitempty"`
+	Type      string           `json:"type"`
 }
+
+// SpeechSentiment defines model for Speech.Sentiment.
+type SpeechSentiment string
 
 // SpeechDetail defines model for SpeechDetail.
 type SpeechDetail struct {

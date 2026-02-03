@@ -874,6 +874,7 @@ components:
           type: string
         sentiment:
           type: string
+          enum: ["stark positiv", "positiv", "neutral", "negativ", "stark negativ", "unbekannt"]
 
       required:
         - id
