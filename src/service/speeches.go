@@ -75,16 +75,16 @@ func (s *TopicsService) GetSpeechSnippets(topicID *int, personID *int, groupId *
 		}
 
 		var sentimentEnum api.SpeechSnippetSentiment
-		if speech.Sentiment > 0.5 {
-			sentimentEnum = api.StarkPositiv
+		if speech.Sentiment > 0.6 {
+			sentimentEnum = api.SpeechSnippetSentimentStarkPositiv
 		} else if speech.Sentiment > 0.2 {
-			sentimentEnum = api.Positiv
-		} else if speech.Sentiment < -0.5 {
-			sentimentEnum = api.StarkNegativ
+			sentimentEnum = api.SpeechSnippetSentimentPositiv
+		} else if speech.Sentiment < -0.6 {
+			sentimentEnum = api.SpeechSnippetSentimentStarkNegativ
 		} else if speech.Sentiment < -0.2 {
-			sentimentEnum = api.Negativ
+			sentimentEnum = api.SpeechSnippetSentimentNegativ
 		} else {
-			sentimentEnum = api.Neutral
+			sentimentEnum = api.SpeechSnippetSentimentNeutral
 		}
 
 		activityIDStr := strconv.Itoa(speech.ActivityID)
@@ -200,6 +200,7 @@ func (s *SpeechesService) GetSpeeches(limit, offset int, topicID *int) ([]api.Sp
 			date = *row.Date
 		}
 
+		sentiment := api.SpeechSentiment(row.Sentiment)
 		speeches[i] = api.Speech{
 			Id:    row.Id,
 			Type:  t,
@@ -217,7 +218,7 @@ func (s *SpeechesService) GetSpeeches(limit, offset int, topicID *int) ([]api.Sp
 			},
 			Session:   row.Session,
 			Publisher: row.Publisher,
-			Sentiment: &row.Sentiment,
+			Sentiment: &sentiment,
 		}
 	}
 
