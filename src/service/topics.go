@@ -23,13 +23,21 @@ func NewTopicsService(db *sqlx.DB, helpersService *HelpersService) *TopicsServic
 	}
 }
 
-func (s *TopicsService) GetTopics(pageSize int, offset int) ([]api.Topic, int, error) {
+func (s *TopicsService) GetTopics(pageSize int, offset int, search *string) ([]api.Topic, int, error) {
 
-	var totalItems int
-	err := s.db.Get(&totalItems, `
+	var searchParam interface{}
+	if search != nil && *search != "" {
+		searchParam = *search
+	}
+
+	countQuery := `
 		SELECT COUNT(*) FROM get_topic_analytics(CURRENT_DATE, 20, NULL, NULL) AS ta
 		JOIN topics t ON t.id = ta.topic_id
-	`)
+		WHERE ($1::text IS NULL OR t.name ILIKE $1 || '%')
+	`
+
+	var totalItems int
+	err := s.db.Get(&totalItems, countQuery, searchParam)
 	if err != nil {
 		log.Printf("Failed to count topics: %v", err)
 		return nil, 0, err
@@ -39,11 +47,12 @@ func (s *TopicsService) GetTopics(pageSize int, offset int) ([]api.Topic, int, e
 		SELECT t.id, t.name, t.updated, t.created, ta.topic_relevance, ta.avg_sentiment
 		FROM get_topic_analytics(CURRENT_DATE, 20, NULL, NULL) AS ta
 		JOIN topics t ON t.id = ta.topic_id
+		WHERE ($3::text IS NULL OR t.name ILIKE $3 || '%')
 		ORDER BY ta.topic_relevance DESC
 		LIMIT $1 OFFSET $2
 	`
 	var rows []types.TopicWithAnalytics
-	err = s.db.Select(&rows, dataQuery, pageSize, offset)
+	err = s.db.Select(&rows, dataQuery, pageSize, offset, searchParam)
 	if err != nil {
 		log.Printf("Failed to query topics: %v", err)
 		return nil, 0, err

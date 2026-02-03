@@ -686,6 +686,9 @@ type GetTopicsParams struct {
 
 	// Offset Number of items to skip (for pagination). Default is 0.
 	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// Search Search string to filter topics by title
+	Search *string `form:"search,omitempty" json:"search,omitempty"`
 }
 
 // ServerInterface represents all server handlers.
@@ -1448,6 +1451,14 @@ func (siw *ServerInterfaceWrapper) GetTopics(w http.ResponseWriter, r *http.Requ
 	err = runtime.BindQueryParameter("form", true, false, "offset", r.URL.Query(), &params.Offset)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "search", r.URL.Query(), &params.Search)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "search", Err: err})
 		return
 	}
 

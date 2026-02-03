@@ -287,7 +287,7 @@ func (s *Server) GetSearch(w http.ResponseWriter, r *http.Request, params api.Ge
 		}
 	}
 
-	topics, _, err := s.topicsService.GetTopics(10000, 0)
+	topics, _, err := s.topicsService.GetTopics(10000, 0, nil)
 	if err != nil {
 		log.Printf("Failed to query topics: %v", err)
 		http.Error(w, "Failed to query topics", http.StatusInternalServerError)
@@ -384,7 +384,12 @@ func (s *Server) GetTopics(w http.ResponseWriter, r *http.Request, params api.Ge
 	log.Printf("GetTopics called")
 	pageSize, offset := PaginationFromRequest(r)
 
-	topics, totalItems, err := s.topicsService.GetTopics(pageSize, offset)
+	var search *string
+	if q := r.URL.Query().Get("search"); q != "" {
+		search = &q
+	}
+
+	topics, totalItems, err := s.topicsService.GetTopics(pageSize, offset, search)
 	if err != nil {
 		log.Printf("Failed to query topics: %v", err)
 		http.Error(w, "Failed to query topics", http.StatusInternalServerError)

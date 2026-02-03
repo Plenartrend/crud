@@ -15,6 +15,12 @@ paths:
       parameters:
         - $ref: '#/components/parameters/PageSize'
         - $ref: '#/components/parameters/Offset'
+        - in: query
+          name: search
+          schema:
+            type: string
+          required: false
+          description: Search string to filter topics by title
       responses:
         '200':
           description: Paginated list of topics.
