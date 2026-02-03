@@ -1,15 +1,9 @@
--- activity_relevance stores protocol relevance
--- activity_mappings stores sentiments regarding topics in activities
-
-
--- TODO everything per election period as otherwise group changes cause misrepresentations
-
---- GENERAL HELPERS ---
 CREATE OR REPLACE VIEW analysed_protocols AS (
     SELECT *
     FROM protocols p
     WHERE EXISTS (SELECT 1 from activities a JOIN activity_mappings am ON am.activity_id = a.id WHERE a.protocol_id = p.id)
 );
+
 
 CREATE OR REPLACE FUNCTION get_last_x_protocols(
     _week_date DATE,
@@ -23,144 +17,6 @@ AS $$
     ORDER BY p.date DESC
     LIMIT _limit;
 $$ LANGUAGE SQL STABLE;
-
------------------- Relevance ------------------
-
-CREATE OR REPLACE VIEW relevance_per_topic AS
-WITH counts AS (
-    SELECT
-        a.protocol_id,
-        am.topic_id,
-        COUNT(*)::float AS topic_count,
-        SUM(COUNT(*)) OVER (PARTITION BY a.protocol_id) AS total_count
-    FROM activity_mappings am
-             JOIN activities a ON a.id = am.activity_id
-    WHERE am.topic_id IS NOT NULL
-    GROUP BY a.protocol_id, am.topic_id
-)
-SELECT
-    protocol_id,
-    topic_id,
-    topic_count,
-    total_count,
-    topic_count / total_count AS topic_share
-FROM counts;
-
-
-CREATE OR REPLACE VIEW relevance_per_topic_per_person AS
-WITH counts AS (
-    SELECT
-        a.protocol_id,
-        am.topic_id,
-        r.person_id,
-        COUNT(*)::float AS topic_count,
-        SUM(COUNT(*)) OVER (PARTITION BY a.protocol_id) AS total_count
-    FROM activity_mappings am
-             JOIN activities a ON a.id = am.activity_id
-             JOIN roles r ON r.id = a.role_id
-    WHERE am.topic_id IS NOT NULL
-    GROUP BY a.protocol_id, am.topic_id, r.person_id
-)
-SELECT
-    protocol_id,
-    topic_id,
-    person_id,
-    topic_count,
-    total_count,
-    topic_count / total_count AS topic_share
-FROM counts;
-
-
-CREATE OR REPLACE VIEW relevance_per_topic_per_group AS
-WITH counts AS (
-    SELECT
-        a.protocol_id,
-        am.topic_id,
-        r.group_id,
-        COUNT(*)::float AS topic_count,
-        SUM(COUNT(*)) OVER (PARTITION BY a.protocol_id) AS total_count
-    FROM activity_mappings am
-             JOIN activities a ON a.id = am.activity_id
-             JOIN roles r ON r.id = a.role_id
-    WHERE am.topic_id IS NOT NULL
-    GROUP BY a.protocol_id, am.topic_id, r.group_id
-)
-SELECT
-    protocol_id,
-    topic_id,
-    group_id,
-    topic_count,
-    total_count,
-    topic_count / total_count AS topic_share
-FROM counts;
-
------------------- Relevance over last x weeks ------------------
-
-CREATE OR REPLACE FUNCTION get_topic_shares(
-    _week_date DATE,
-    _limit INT,
-    _group_id INT DEFAULT NULL,
-    _person_id INT DEFAULT NULL
-)
-RETURNS TABLE (topic_id INT, topic_share FLOAT) 
-AS $$
-    WITH counts AS (
-        SELECT
-            am.topic_id,
-            COUNT(*)::float AS topic_count,
-            SUM(COUNT(*)) OVER () AS total_count
-        FROM activity_mappings am
-        JOIN activities a ON a.id = am.activity_id
-        JOIN roles r ON r.id = a.role_id
-        WHERE am.topic_id IS NOT NULL
-          AND a.protocol_id IN (SELECT id FROM get_last_x_protocols(_week_date, _limit))
-          AND (_group_id IS NULL OR r.group_id = _group_id)
-          AND (_person_id IS NULL OR r.person_id = _person_id)
-        GROUP BY am.topic_id
-    )
-    SELECT
-        topic_id,
-        topic_count / NULLIF(total_count, 0)
-    FROM counts;
-$$ LANGUAGE SQL STABLE;
-
------------------- Sentiment over last x weeks ------------------
-
-CREATE OR REPLACE FUNCTION get_topic_sentiment(
-    _week_date DATE,
-    _limit INT,
-    _group_id INT DEFAULT NULL,
-    _person_id INT DEFAULT NULL
-)
-RETURNS TABLE (topic_id INT, avg_sentiment FLOAT) 
-AS $$
-    SELECT
-        am.topic_id,
-        AVG(am.sentiment_value)::float
-    FROM activity_mappings am
-    JOIN activities a ON a.id = am.activity_id
-    JOIN roles r ON r.id = a.role_id
-    WHERE am.topic_id IS NOT NULL
-      AND a.protocol_id IN (SELECT id FROM get_last_x_protocols(_week_date, _limit))
-      AND (_group_id IS NULL OR r.group_id = _group_id)
-      AND (_person_id IS NULL OR r.person_id = _person_id)
-    GROUP BY am.topic_id;
-$$ LANGUAGE SQL STABLE;
-
---- ... ---
-
-CREATE OR REPLACE VIEW topic_relevance_weekly AS
-SELECT ar.topic_id, avg(ar.relevance) AS relevance, date_trunc('week', p.date) AS week
-FROM activity_relevance ar, protocols p
-WHERE ar.protocol_id = p.id
-GROUP BY ar.topic_id, date_trunc('week', p.date);
-
-
-CREATE OR REPLACE VIEW topic_relevance AS
-SELECT topic_id, avg(relevance) AS relevance
-FROM topic_relevance_weekly
-GROUP BY topic_id;
-
 
 ---Combined---
 
@@ -347,64 +203,6 @@ RETURNS TABLE (
     );
 $$ LANGUAGE SQL STABLE;
 
------------------- Volatility ------------------
-
-
-CREATE OR REPLACE VIEW party_topic_volatility AS
-WITH monthly_changes AS (
-    SELECT 
-        topic_id,
-        group_id,
-        sentiment,
-        week,
-        ABS(sentiment - LAG(sentiment, 4) OVER (PARTITION BY topic_id, group_id ORDER BY week)) AS sentiment_change
-    FROM party_topic_sentiment_weekly
-)
-SELECT 
-    topic_id,
-    group_id,
-    AVG(sentiment_change) AS volatility
-FROM monthly_changes
-WHERE sentiment_change IS NOT NULL
-GROUP BY topic_id, group_id;
-
-
-CREATE OR REPLACE VIEW party_volatility AS
-SELECT 
-    group_id,
-    AVG(volatility) AS volatility
-FROM party_topic_volatility
-GROUP BY group_id;
-
-
-CREATE OR REPLACE VIEW topic_volatility AS
-SELECT 
-    topic_id,
-    AVG(volatility) AS volatility
-FROM party_topic_volatility
-GROUP BY topic_id;
-
-
------------------- Politician Activity ------------------
-
-
-CREATE OR REPLACE VIEW politician_activity_per_period AS
-SELECT 
-    r.person_id,
-    r.election_period,
-    (COUNT(a.id)::FLOAT / NULLIF(COUNT(DISTINCT a.protocol_id), 0)) AS activities_per_protocol
-FROM activities a, roles r
-WHERE a.role_id = r.id
-GROUP BY r.person_id, r.election_period;
-
-
-CREATE OR REPLACE VIEW average_politician_activity_per_period AS
-SELECT 
-    election_period,
-    AVG(pa.activities_per_protocol) AS average_activities_per_protocol
-FROM politician_activity_per_period pa
-GROUP BY election_period;
-
 
 ------------------ Time Series Analytics (Optimized) ------------------
 
@@ -503,15 +301,34 @@ ORDER BY ws.week_start ASC;
 $$ LANGUAGE SQL STABLE;
 
 
-CREATE OR REPLACE FUNCTION power_mean(p_value NUMERIC, vals NUMERIC[])
-RETURNS NUMERIC AS $$
-BEGIN
-    RETURN POWER(
-        (SELECT AVG(POWER(v, p_value)) FROM unnest(vals) AS v), 
-        1.0 / p_value
-    );
-END;
-$$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION get_volatility_for_election_period(
+    _election_period INT,
+    _person_ids INT[] DEFAULT NULL,
+    _group_id INT DEFAULT NULL,
+    _topic_id INT DEFAULT NULL
+)
+    RETURNS TABLE (
+                      person_id INT,
+                      volatility FLOAT
+                  )
+AS $$
+WITH std_dev_per_person_topic AS (
+    SELECT r.person_id, am.topic_id, stddev_pop(am.sentiment_value) as std_dev
+    FROM activity_mappings am 
+    JOIN activities a ON a.id = am.activity_id
+    JOIN roles r ON r.id = a.role_id 
+    JOIN protocols p ON p.id = a.protocol_id
+    WHERE p.election_period = _election_period
+      AND (_person_ids IS NULL OR r.person_id = ANY(_person_ids))
+      AND (_group_id IS NULL OR r.group_id = _group_id)
+      AND (_topic_id IS NULL OR am.topic_id = _topic_id)
+    GROUP BY r.person_id, am.topic_id
+    HAVING COUNT(*) > 1
+)
+SELECT sppt.person_id, COALESCE(AVG(sppt.std_dev), 0.0) as volatility
+FROM std_dev_per_person_topic sppt
+GROUP BY sppt.person_id;
+$$ LANGUAGE SQL STABLE;
 
 
 CREATE OR REPLACE FUNCTION get_volatility_for_election_period(
@@ -541,6 +358,34 @@ WITH std_dev_per_person_topic AS (
 SELECT sppt.person_id, COALESCE(AVG(sppt.std_dev), 0.0) as volatility
 FROM std_dev_per_person_topic sppt
 GROUP BY sppt.person_id;
+$$ LANGUAGE SQL STABLE;
+
+
+CREATE OR REPLACE FUNCTION get_volatility_for_election_period_groups(
+    _election_period INT,
+    _group_ids INT[] DEFAULT NULL,
+    _topic_id INT DEFAULT NULL
+)
+RETURNS TABLE (
+    group_id INT,
+    volatility FLOAT
+)
+AS $$
+WITH std_dev_per_group_topic AS (
+    SELECT r.group_id, am.topic_id, stddev_pop(am.sentiment_value) as std_dev
+    FROM activity_mappings am 
+    JOIN activities a ON a.id = am.activity_id
+    JOIN roles r ON r.id = a.role_id 
+    JOIN protocols p ON p.id = a.protocol_id
+    WHERE p.election_period = _election_period
+      AND (_group_ids IS NULL OR r.group_id = ANY(_group_ids))
+      AND (_topic_id IS NULL OR am.topic_id = _topic_id)
+    GROUP BY r.group_id, am.topic_id
+    HAVING COUNT(*) > 1
+)
+SELECT spgt.group_id, COALESCE(AVG(spgt.std_dev), 0.0) as volatility
+FROM std_dev_per_group_topic spgt
+GROUP BY spgt.group_id;
 $$ LANGUAGE SQL STABLE;
 
 

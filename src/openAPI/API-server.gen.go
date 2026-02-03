@@ -280,11 +280,8 @@ type Party struct {
 	Name *string `json:"name,omitempty"`
 
 	// NumSpeeches Number of speeches by party members in current year
-	NumSpeeches *int `json:"numSpeeches,omitempty"`
-
-	// NumTopics Number of top topics for this party
-	NumTopics *int        `json:"numTopics,omitempty"`
-	TopTopics *[]TopTopic `json:"topTopics,omitempty"`
+	NumSpeeches *int            `json:"numSpeeches,omitempty"`
+	TopTopics   *[]TopicSummary `json:"topTopics,omitempty"`
 
 	// Volatility Volatility level (Niedrig, Mittel, Hoch)
 	Volatility *string `json:"volatility,omitempty"`
@@ -300,10 +297,7 @@ type PartyDetail struct {
 
 	// ContributionFactor Contribution factor level
 	ContributionFactor *PartyDetailContributionFactor `json:"contributionFactor,omitempty"`
-
-	// Drucksachen Recent printed papers (Drucksachen)
-	Drucksachen *[]PrintedPaper `json:"drucksachen,omitempty"`
-	Id          *string         `json:"id,omitempty"`
+	Id                 *string                        `json:"id,omitempty"`
 
 	// Members Party members
 	Members *[]Politician `json:"members,omitempty"`
@@ -314,12 +308,12 @@ type PartyDetail struct {
 	// NumSpeeches Number of speeches by party members in current year
 	NumSpeeches *int `json:"numSpeeches,omitempty"`
 
-	// NumTopics Number of top topics for this party
-	NumTopics *int `json:"numTopics,omitempty"`
+	// PrintedPapers Recent printed papers
+	PrintedPapers *[]PrintedPaper `json:"printedPapers,omitempty"`
 
 	// RecentSpeeches Recent speeches by party members
 	RecentSpeeches *[]SpeechSnippet `json:"recentSpeeches,omitempty"`
-	TopTopics      *[]TopTopic      `json:"topTopics,omitempty"`
+	TopTopics      *[]TopicSummary  `json:"topTopics,omitempty"`
 
 	// Volatility Volatility level (Niedrig, Mittel, Hoch)
 	Volatility *string `json:"volatility,omitempty"`
@@ -542,6 +536,15 @@ type TopicDetailTrend string
 type TopicRef struct {
 	Category string `json:"category"`
 	Id       string `json:"id"`
+}
+
+// TopicSummary defines model for TopicSummary.
+type TopicSummary struct {
+	// Id Unique identifier for the topic
+	Id *int `json:"id,omitempty"`
+
+	// Title Title/name of the topic
+	Title *string `json:"title,omitempty"`
 }
 
 // TrendDataPoint defines model for TrendDataPoint.

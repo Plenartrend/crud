@@ -27,7 +27,7 @@ type Server struct {
 func NewServer(db *sqlx.DB) *Server {
 	helpersService := service.NewHelpersService(db)
 	topicsService := service.NewTopicsService(db, helpersService)
-	partiesService := service.NewPartyService(db, topicsService)
+	partiesService := service.NewPartyService(db, helpersService, topicsService)
 	politiciansService := service.NewPoliticiansService(db, topicsService, helpersService)
 	speechesService := service.NewSpeechesService(db)
 	return &Server{

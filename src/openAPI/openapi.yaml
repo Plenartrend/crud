@@ -642,6 +642,16 @@ components:
           type: integer
           description: Number of speeches given on this topic
 
+    TopicSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Unique identifier for the topic
+        title:
+          type: string
+          description: Title/name of the topic
+
     ElectionPeriod:
       type: object
       properties:
@@ -777,13 +787,10 @@ components:
         numSpeeches:
           type: integer
           description: Number of speeches by party members in current year
-        numTopics:
-          type: integer
-          description: Number of top topics for this party
         topTopics:
           type: array
           items:
-            $ref: '#/components/schemas/TopTopic'
+            $ref: '#/components/schemas/TopicSummary'
 
     TopicDetail:
       allOf:
@@ -908,11 +915,11 @@ components:
               items:
                 $ref: '#/components/schemas/TrendDataPoint'
               description: Activity trend over time
-            drucksachen:
+            printedPapers:
               type: array
               items:
                 $ref: '#/components/schemas/PrintedPaper'
-              description: Recent printed papers (Drucksachen)
+              description: Recent printed papers
             recentSpeeches:
               type: array
               items:
